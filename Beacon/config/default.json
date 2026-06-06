@@ -1,0 +1,85 @@
+{
+  "crypto_key": "59f0bdd783a52c66b94c37c59980a229a575f6ce35e68c39e2e760a89c7dd620",
+  "c2_channels": [
+    {
+      "type": "HTTPS",
+      "host": "127.0.0.1",
+      "port": 6767,
+      "path": "/api/checkin",
+      "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "max_consecutive_failures": 5,
+      "backoff_sleep_ms": 10000,
+      "http_method": "POST"
+    }
+  ],
+  "sleep_ms": 5000,
+  "jitter_pct": 20,
+  "use_indirect_syscalls": false,
+  "indirect_syscall_pivot": "ZwSetDefaultLocale",
+  "lazy_checkin": false,
+  "lazy_checkin_max": 2,
+  "lazy_unhook": false,
+  "pad": true,
+  "pad_max": 1024,
+  "sleep_obfuscation": "ekko",
+  "sleep_wipe_pe_headers": false,
+  "sleep_stack_spoof": false,
+  "num_spoof_frames": 6,
+  "stack_spoof_chain": [
+    {
+      "module": "ntdll.dll",
+      "function": "RtlUserThreadStart"
+    },
+    {
+      "module": "kernel32.dll",
+      "function": "BaseThreadInitThunk"
+    },
+    {
+      "module": "kernel32.dll",
+      "function": "VirtualAlloc"
+    },
+    {
+      "module": "ntdll.dll",
+      "function": "NtAllocateVirtualMemory"
+    }
+  ],
+  "kill_date": "2027-04-07",
+  "options": {
+    "sandbox_evasion": false,
+    "debug_mode": false,
+    "bypass_etw": false,
+    "validate_ssl": false
+  },
+  "malleable_config": {
+    "wrapper": {
+      "prefix": "REQ_${RAND_B64:4}_",
+      "suffix": "_${JUNK:8}"
+    },
+    "http_headers": [
+      {
+        "name": "X-Request-ID",
+        "value": "${RAND_B64:16}"
+      }
+    ],
+    "payload_location": {
+      "type": "body",
+      "body_content_type": "text/plain",
+      "param_name": "",
+      "path_prefix": "",
+      "path_suffix": ""
+    }
+  },
+  "work_hours": {
+    "enabled": false,
+    "start_hour": 9,
+    "start_minute": 0,
+    "end_hour": 17,
+    "end_minute": 0,
+    "insomnia": false
+  },
+  "spawnto": {
+    "x64": "C:\\Windows\\System32\\rundll32.exe",
+    "x86": "C:\\Windows\\SysWOW64\\rundll32.exe"
+  },
+  "beacon_id": "04ef93eef0e0f069"
+}

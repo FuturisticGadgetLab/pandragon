@@ -1,0 +1,190 @@
+
+0.9.6: Async BOFs + Sleep Mask Integration + Donut
+
+Phase 1: Async BOF ↔ Sleep Mask Integration (Ekko)
+- New CHANNEL_SIGNAL enum: FORCE_SLEEP(3), WAKEUP_SEND(4), WAKEUP_EXIT(5)
+- BOF SDK macros (beacon_compatibility.h): MASK_FORCE_SLEEP(ch, sec), MASK_WAKEUP_SEND(ch), MASK_WAKEUP_EXIT(ch), MASK_STOP_TASK(ch), MASK_IS_SLEEPING(ch), MASK_PRINTF_IF_AWAKE(ch, ...)
+- Per-BOF channel passing: beacon prepends channel pointer to BOF args; BOF extracts via BeaconDataExtract() — no global state
+- Beacon main loop: checkAsyncBofForceSleep() overrides sleep; checkAsyncBofWakeupSignals() flushes output/cleans up
+- Async BOF concurrency note: infrastructure supports multi-async, but single async in practice (Ekko mask is per-process)
+
+Phase 3: Server-side Donut Integration
+- server/commands/donut.py — DonutExecutor, encode_shellcode/decode_shellcode (base32)
+- server/commands/execute_pe.py — handle_execute_pe() / handle_execute_assembly()
+- BofDev/shellcode_loader.c — 500-byte universal PE runner (RWX alloc + execute)
+- WebSocket handlers in operator_ws.py: execute_pe (native PE/DLL) + execute_assembly (.NET)
+
+Documentation
+- README.txt: async BOF + sleep mask section, Donut integration section, concurrency note
+
+Files Modified:
+- Beacon/include/coff/COFFSetup.h (signals, bof_channel in async_bof_state)
+- Beacon/include/coff/beacon_compatibility.h (BOF SDK macros, C-compatible types)
+- Beacon/core/coff/beacon_compatibility.cpp (spawn stubs using functionTable)
+- Beacon/core/coff/async_bof_manager.cpp (dispatchCommands handles signals)
+- Beacon/core/coff/bof_runner.cpp (prepends channel ptr to args, cleans up)
+- Beacon/core/main.cpp (checkAsyncBofForceSleep, checkAsyncBofWakeupSignals in main loop)
+- Beacon/include/pandragon_runtime.h (SleepState enum, async channel accessors)
+- Beacon/core/pandragon_runtime.cpp (SleepState init, ExecuteSleep sets SLEEPING/AWAKE)
+- BofDev/async_bof_test.c (demo async BOF with sleep mask integration)
+- BofDev/shellcode_loader.c (universal PE runner BOF)
+- server/commands/donut.py (new)
+- server/commands/execute_pe.py (new)
+- server/handlers/operator_ws.py (execute_pe, execute_assembly WS handlers)
+- README.txt (documentation)
+
+Build: make clean && make -> build/beacon/pandragon.exe OK
+BOF: async_bof_test.o, shellcode_loader.o compile OK
+Server: donut.py, execute_pe.py import OK
+
+refactor: async server core, Beacon, GUI polishing
+
+refactor: async server core, beacon hardening, GUI polish
+
+Server:
+- Migrate BeaconSession, BeaconRegistry, TaskQueue to asyncio (asyncio.Lock
+  replaces threading, all session methods become async)
+- Add route index for O(1) candidate lookup in BeaconRegistry
+- BOF execution reads files via run_in_executor to avoid blocking event loop
+- File transfer uses temp files instead of in-memory chunk assembly
+- Relay handler rewritten: decrypts child packets, dispatches opcodes,
+  builds encrypted responses via transport handler
+- Beacon handler gets opcode dispatch table + RELAY_CHILD_UP support
+- HTTP transport: bytes-based query handling, proper content-type
+- WebSocket handler: request-ID based response matching for concurrency
+- pytest-asyncio added to requirements
+
+Beacon (C++):
+- COFF loader: sectionBounds tracking, relocation OOB checks, secure wipe
+  with correct per-section size
+- BofCache: properly calls CleanupCOFF on clear
+- AsyncBofManager: wait for thread exit before freeing context
+- Injection: bounds checks for e_lfanew, SizeOfHeaders, p_offset
+- pkcs7Unpad: returns (size_t)-1 sentinel instead of 0
+- Bastia crypto: __memset replaced with crypto_wipe + compiler barrier;
+  BUILD_TIME_RANDOM_SEED promoted from warning to error
+- Transport type strings encrypted with lcg_encrypt at failover
+- TCP: WSAStartup called once, WSACleanup removed
+- WinHTTP: geometric growth buffer, uint16_t header lengths
+- net_abstract: switchChannel clears malleable config, b64url rejects invalid
+  chars, sendData refuses plaintext fallback, sendExfil null-check reorder
+- Kill handler (0xFF) registered
+- Default config adds VirtualAlloc/NtAllocateVirtualMemory to stack chain
+
+GUI:
+- Beacon table: QAbstractTableModel + proxy, batch selection, search filter,
+  keyboard shortcuts (Ctrl+R, Delete)
+- API client: request-ID pending map, auto-reconnect with exponential backoff
+- Graph widget: incremental scene updates, zoom/pan, double-click navigation
+- Beacon detail: output search highlighting, error coloring, timer lifecycle
+- Task queue: WebSocket-driven auto-flush, drag-to-reorder, inline editing,
+  incremental tree updates
+- Config builder: background build thread, progress bar, card-based chain
+  editor with drag-drop anchors
+- Notification overlay: dismiss signal propagation
+- Splash: timer-based with click-to-bypass
+- Relay widget: incremental table updates
+
+full GUI theming engine, startup splash, branding
+- full GUI theming engine, startup splash, branding, QSS-driven UI
+GUI:
+  - ThemeManager (gui/theme.py) loads QSS from gui/themes/ at runtime,
+    persists last theme via state; make_switcher() returns QComboBox
+  - 4 QSS themes: neon (dark+cyan), matrix (green-on-black),
+    blood (dark crimson), nerv (Evangelion NERV console)
+  - All inline setStyleSheet() calls removed from beacon_detail.py,
+    beacon_table.py, task_queue_widget.py — delegated to QSS via
+    setObjectName()
+  - QWidget#beaconDetailContainer, QWidget#configTab transparent
+    backgrounds for proper theme pane colour beneath scroll content
+  - SplashScreen stage icons driven by QSS objectName selectors
+    (QLabel#stageIcon_*) instead of hardcoded #00ff00 green
+  - QHeaderView + QTableCornerButton::section styling for themed
+    table column headers
+  - ConfigBuilderWidget (gui/widgets/config_builder_widget.py):
+    6-tab visual config editor, invokes config_builder.py toolchain,
+    syncs to known_beacons.json
+  - NotificationOverlay (gui/widgets/notification_overlay.py):
+    toast notification system, 4 styles, auto-dismiss, stacking
+  - StartSplash (gui/widgets/startup_splash.py): Hermes quote
+    on black, auto-dismiss after 3.5s, click-to-bypass for
+    impatient operators. Displays "Pandragon" + "a serexp / FGL
+    production"
+  - ConnectPanel branding: "PANDRAGON" + "serexp · FGL"
+  - Status bar footer: Hermes quote, PANDRAGON branding, theme
+    switcher
+  - State persistence in gui/.state.json (last_theme, last_url,
+    last_username, last_token)
+  - Fixed QFont import in main.py, deferred resize via
+    QTimer.singleShot(0, ...), proper stacked-widget page ordering
+  - .gitignore: added gui/.state.json
+
+feat: config-driven stack spoof engine
+with EAT-boundary ret resolution!
+
+- Add StackChainEntry struct (module, function, resolvedAddr, offset)
+  and stack_chain_count/stack_chain fields to BeaconConfig
+- ResolveStackChain() parses EAT at runtime: GetModuleBaseAddressA
+  → __LoadLibraryW fallback → nearest-neighbor boundary → last 0xC3
+- Optional explicit offset: funcRVA + N directly when offset != 0
+  (scan for last ret otherwise), avoiding function-length byte walk
+- Forwarded exports skipped; unresolved entries silently dropped
+- Sleep stack uses resolved chain in place of hardcoded addr pair;
+  TEB-swap-only fallback if all entries unresolved
+- num_spoof_frames config field (uint16, default 6) controls frame count
+- Blob format: count(2B) + per-entry offset(4B) + mod_len+mod + fn_len+fn
+- Schema, How2Config.txt, README.txt documented
+- tools/config_builder.py: serializes chain, prepends default
+  ntdll!RtlUserThreadStart + kernel32!BaseThreadInitThunk if empty
+- tools/config_decrypt.py: parses and displays chain with offsets
+
+Pandragon 0.9.5: Protocol hardening, chunked file transfer, and indirect syscall support
+
+This release includes protocol hardening fixes, migration to chunked file transfer protocol, and new indirect syscall pivot support for enhanced operational security.
+
+- Fix RAND_B64 macro to use URL-safe base64 (RFC 4648 §5) with characters [A-Za-z0-9-_] instead of standard base64 [A-Za-z0-9+/] to avoid + and / which may be blocked or encoded differently by certain proxies
+- Improve decrypt_payload error handling: return empty byte strings instead of verbose error messages, use .shape[0] for buffer length checks to work properly with memoryview objects
+- Add parse_header() function for header-only parsing without full decryption (useful for debugging and initial packet inspection)
+- Add new server-to-beacon opcodes: BOF_FREE, INJECT_PROCESS, MIGRATE, HOLLOW_PROCESS
+- Add new beacon-to-server opcodes: LIST_FILES_RESULT
+- Remove FILE_UPLOAD inline handler (replaced by chunked protocol)
+
+- Migrate from inline file transfer to chunked file transfer protocol:
+  - FILE_DOWNLOAD (inline) → FILE_DOWNLOAD_START + FILE_DOWNLOAD_CHUNK
+  - FILE_UPLOAD (inline) → FILE_UPLOAD_START + FILE_UPLOAD_CHUNK
+- Remove _build_file_download() and _build_file_upload() inline handlers
+- Add _build_rotate_key() for ROTATE_KEY opcode (beacon ignores payload)
+- Update MAX_HOLLOWING_PAYLOAD to 16MB (from previous limit)
+
+- Add --debug CLI flag to enable verbose debug logging via PANDRAGON_DEBUG env var
+- Track and log BEACON_POLL (0x02) opcode handling
+- Improve malleable C2 unwrapping logic:
+  - Full packet decryption using parse_packet() instead of just header parsing
+  - Better debug logging throughout PSK config matching
+  - Improved error handling for base64 decode failures
+- Enhanced logging for empty POST bodies with headers info
+- Improved registered beacon fallback with better debug output
+
+- Add derive_beacon_id() function: derives 8-byte beacon_id from 32-byte crypto_key using SHA-256(first 8 bytes as hex) - allows configs to omit explicit beacon_id
+- Auto-derive beacon_id from crypto_key if not specified in config
+- Validate provided beacon_id matches derived value if both specified
+- Add indirect_syscall_pivot support:
+  - New config field for specifying custom Zw* function to use for indirect syscalls
+  - Validate pivot starts with 'Zw' (not 'Nt')
+  - Set bit 12 (0x1000) in options_bitfield when configured: indirect_pivot_set
+  - Pack indirect_pivot name length + name into config blob
+- Add payload_location/HTTP method mismatch warnings:
+  - Warn when POST method used with query_param payload_location
+  - Suggest using GET for query_param or changing to body
+- Update pad_max field handling (read from config, pack as 2 bytes)
+
+
+- Update test_payload_builder.py for chunked protocol changes:
+  - FILE_DOWNLOAD_START passes path through unchanged
+  - FILE_UPLOAD_START passes path through unchanged
+  - Remove tests for inline file transfer handlers
+
+- Fix setup.py
+
+Extension configuration for Cython compilation
+

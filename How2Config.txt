@@ -1,0 +1,565 @@
+PANDRAGON CONFIGURATION GUIDE
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Table of Contents
+  1. Overview
+  2. Server Config (config.json)
+  3. Listeners
+  4. Beacon Config (Beacon/config/default.json)
+  5. Malleable C2
+  6. Tools
+  7. Auto-Generated Files
+  8. SSL Certificates
+  9. Quick Start
+
+
+=====================================================================
+1. OVERVIEW
+=====================================================================
+
+Pandragon has four config file types:
+
+  File                       Purpose                       How created
+  ─────────────────────────────────────────────────────────────────────
+  server/config.json         Server settings               Hand-edited
+  Beacon/config/default.json Beacon compilation config     Hand-edited
+  server/known_beacons.json  Pre-registered beacons        Auto (config_builder.py)
+  server/operators.json      Operator credentials          Auto (run.py create)
+
+  │  Beacon/config/default.json        server/config.json
+  │         │                                │
+  │         ▼                                ▼
+  │  config_builder.py ──► generated_config.h  +  known_beacons.json
+  │                           (beacon binary)      (server uses for auth)
+  │                                                
+  │         ┌──────────────────────────────────────┘
+  │         ▼
+  │  At startup the server reads known_beacons.json and
+  │  registers HTTP handlers for every route found in it.
+  │  No manual route maintenance needed.
+
+To validate any config file:
+  python3 tools/config_check.py <file>
+
+
+=====================================================================
+2. SERVER CONFIG (server/config.json)
+=====================================================================
+
+This is the main server configuration. A minimal example:
+
+  {
+      "server": {
+          "host": "0.0.0.0",
+          "port": 6767,
+          "ssl_cert": "ssl/cert.pem",
+          "ssl_key": "ssl/key.pem",
+          "session_timeout_minutes": 60,
+          "custom_headers": [
+              {"name": "X-Powered-By", "value": "Pandragon"},
+              {"name": "X-Request-ID", "value": "UhhReplaceMe"}
+          ]
+      },
+      "beacon": {
+          "bof_directory": "bofs",
+          "download_directory": "pandragon_downloads/"
+      },
+      "listeners": [ ... ],
+      "security": {
+          "max_payload_size": 10485760
+      },
+      "operator_routes": {
+          "websocket": {"path": "/ws"}
+      },
+      "logging": {
+          "level": "INFO",
+          "target": "pandragon.log"
+      },
+      "audit": {
+          "enabled": false,
+          "target": "pandragon_audit.log"
+      }
+  }
+
+2a. server section (fallback when no listeners defined)
+───────────────────────────────────────────────────────
+  Field                    Default         Description
+  ───────────────────────────────────────────────────────────────
+  host                     "0.0.0.0"       Bind address
+  port                     6767            HTTPS port
+  ssl_cert                 "ssl/cert.pem"  TLS cert path
+  ssl_key                  "ssl/key.pem"   TLS key path
+  session_timeout_minutes  30              Operator session timeout
+  custom_headers           []              Extra HTTP response headers
+
+  When the "listeners" array is empty, a single HTTPS listener is
+  synthesised from these fields so you can omit listeners entirely
+  for simple setups.
+
+2b. beacon section
+──────────────────
+  Field                    Default                  Description
+  ───────────────────────────────────────────────────────────────
+  bof_directory            "bofs"                   BOF .o file dir
+  download_directory       "/tmp/pandragon_downloads" File download dir
+
+2c. security section
+────────────────────
+  Field                    Default   Description
+  ───────────────────────────────────────────────────────────────
+  max_payload_size         10485760   Max WebSocket payload (bytes)
+
+2d. operator_routes section
+───────────────────────────
+  Field                           Default  Description
+  ───────────────────────────────────────────────────────────────
+  operator_routes.websocket.path  "/ws"    Operator WS endpoint
+
+2e. logging section
+───────────────────
+  Field     Default   Description
+  ───────────────────────────────────────────────────────────────
+  level     "INFO"    One of DEBUG, INFO, WARNING, ERROR, CRITICAL
+  target    ""        Log file path (empty = console only)
+
+2f. audit section
+─────────────────
+  Field     Default                Description
+  ───────────────────────────────────────────────────────────────
+  enabled   true (in code)         Enable audit logging
+  target    "pandragon_audit.log"  Audit log file
+
+
+=====================================================================
+3. LISTENERS
+=====================================================================
+
+Listeners define what network endpoints the server binds to. If the
+array is empty a single HTTPS listener is synthesised from the
+server.* config fields.
+
+Supported protocols:  http, https, tcp
+
+Each listener:
+
+  {
+      "name": "operator_https",
+      "protocol": "https",
+      "host": "0.0.0.0",
+      "port": 6767,
+      "ssl_cert": "ssl/cert.pem",        // required for https
+      "ssl_key": "ssl/key.pem",           // required for https
+      "primary": true,                    // exactly one primary
+      "beacon_enabled": true              // register beacon routes?
+  }
+
+  Field            Default       Notes
+  ─────────────────────────────────────────────────────
+  name             "unnamed"     Display name
+  protocol         "https"       http | https | tcp
+  host             "0.0.0.0"
+  port             443 (https)   Must be 1-65535
+                          80 (http)
+  ssl_cert         None          Required for https
+  ssl_key          None          Required for https
+  primary          false         Mark one as primary (first https
+                                 auto-assigned if none set)
+  beacon_enabled   true          If true, beacon HTTP routes are
+                                 registered on this listener.
+                                 If false, only the operator
+                                 WebSocket is served (primary)
+                                 or nothing is served (extra).
+
+How listeners are wired to routes:
+
+  Primary listener (hosts operator WebSocket):
+    beacon_enabled=true  ->  operator WS + beacon HTTP routes
+    beacon_enabled=false ->  operator WS only
+
+  Extra HTTP/S listeners:
+    beacon_enabled=true  ->  beacon HTTP routes only
+    beacon_enabled=false ->  skipped (no routes to serve)
+
+  TCP listeners are not affected by beacon_enabled; they always
+  accept beacon connections (raw TCP with length-prefixed frames).
+
+The primary listener always hosts the operator WebSocket endpoint.
+Extra (non-primary) listeners are started as background tasks.
+
+
+=====================================================================
+4. BEACON CONFIG (Beacon/config/default.json)
+=====================================================================
+
+This is the hand-authored config that gets compiled into the beacon
+binary. Validate it manually (the Makefile already does it automatically) with:
+
+  python3 tools/config_check.py Beacon/config/default.json
+
+Full example (Beacon/config/default.json):
+  {
+      "crypto_key": "59f0bd...7dd620",
+      "c2_channels": [
+          {
+              "type": "HTTPS",
+              "host": "127.0.0.1",
+              "port": 6767,
+              "path": "/api/checkin",
+              "user_agent": "Mozilla/5.0 ... Chrome/120.0.0.0",
+              "http_method": "POST",
+              "max_consecutive_failures": 5,
+              "backoff_sleep_ms": 10000
+          }
+      ],
+      "sleep_ms": 5000,
+      "jitter_pct": 20,
+      "kill_date": "2027-04-07",
+      "options": {
+          "sandbox_evasion": false,
+          "debug_mode": false,
+          "bypass_etw": false,
+          "validate_ssl": false
+      },
+      "use_indirect_syscalls": false,
+      "lazy_checkin": false,
+      "sleep_obfuscation": "none",
+      "sleep_stack_spoof": false,
+      "num_spoof_frames": 6,
+      "pad": true,
+      "pad_max": 1024,
+      "malleable_config": { ... },
+      "work_hours": {
+          "enabled": false,
+          "start_hour": 9,
+          "start_minute": 0,
+          "end_hour": 17,
+          "end_minute": 0,
+          "insomnia": false
+      },
+      "spawnto": {
+          "x64": "C:\\Windows\\System32\\rundll32.exe",
+          "x86": "C:\\Windows\\SysWOW64\\rundll32.exe"
+      }
+  }
+
+4a. Identity
+────────────────
+  Field        Length  Notes
+  ─────────────────────────────────────────────────
+  crypto_key   64 hex  Auto-generated if absent; 32 bytes
+  beacon_id    16 hex  Auto-derived from crypto_key via
+                       SHA256(crypto_key)[:16] if absent
+
+4b. C2 Channels (c2_channels)
+──────────────────────────────
+  Array of 1-4 channel objects. At least one required.
+
+  Field                    Default    Notes
+  ─────────────────────────────────────────────────────────
+  type                     -          HTTP | HTTPS | TCP | PIPE
+  host                     -          Server hostname/IP
+  port                     1-65535    Server port
+  path                     -          HTTP path (required for HTTP/HTTPS)
+  user_agent               -          User-Agent (required for HTTP/HTTPS)
+  http_method              "GET"      GET | POST
+  max_consecutive_failures -          1-100 (failover threshold)
+  backoff_sleep_ms         -          1000-300000 (backoff in ms)
+  malleable_config         null       Per-channel malleable overrides
+
+  Channels are tried in order. When a channel hits its
+  max_consecutive_failures the beacon rotates to the next one.
+
+4c. Timing
+──────────────
+  sleep_ms    100-3 600 000   Base sleep between check-ins (ms)
+  jitter_pct  0-100           Random jitter applied to sleep
+
+4d. Options
+───────────
+  All boolean, default false:
+
+  sandbox_evasion    Skip check-in if sandbox detected
+  debug_mode         Enable debug output
+  bypass_etw         Patch ETW via HWBP before check-in
+  validate_ssl       Validate TLS certs (set true for production)
+
+4e. Advanced
+────────────
+  use_indirect_syscalls     Use HWBPs for indirect syscalls
+  indirect_syscall_pivot    Custom pivot API (must start with Zw)
+  lazy_checkin              Defer system info until a random poll
+  lazy_checkin_max          1-255 (polls before guaranteed)
+  lazy_unhook               Unhook DLLs only before BOF exec
+  sleep_obfuscation         none | ekko | foliage
+  sleep_wipe_pe_headers     Zero PE headers during sleep
+  sleep_stack_spoof         Swap TEB StackBase/StackLimit to helper stack during
+                            Ekko sleep; places fake return-address frames on the
+                            helper stack (see §4i for the address pool)
+  num_spoof_frames          Number of fake return-address frames to write (0-65535).
+                            If 0 and stack spoofing is enabled, defaults to 6 frames.
+                            The frames cycle through the addresses in stack_spoof_chain.
+  kill_date                 YYYY-MM-DD (beacon stops after)
+
+4f. Padding
+───────────
+  pad       Enable random padding on check-in packets
+  pad_max   Max pad bytes (default 1024)
+
+4g. Work Hours (UTC)
+────────────────────
+  enabled        Enable work hours enforcement
+  start_hour     0-23
+  start_minute   0-59
+  end_hour       0-23
+  end_minute     0-59
+  insomnia       If true: wake but skip check-in outside hours.
+                 If false: sleep silently until work hours start.
+
+4h. SpawnTo
+───────────
+  x64     Path for 64-bit process injection
+  x86     Path for 32-bit process injection
+          Supports %%ENV_VAR%% runtime expansion.
+
+4i. Stack Spoof Chain (stack_spoof_chain)
+─────────────────────────────────────────
+  Array of {module, function} objects defining the pool of return addresses
+  to place on the spoofed Ekko sleep stack. Each entry is resolved at runtime
+  (during init, before .text encryption) by:
+
+    1. GetModuleBaseAddressA(module) — PEB walk for already-loaded module
+    2. If not loaded -> __LoadLibraryW() loads it dynamically
+    3. Parse the module's Export Address Table to locate the function by name
+    4. Find the function's end boundary via nearest-neighbor export RVA
+    5. Scan for the LAST 0xC3 (ret) instruction within that range
+    6. Store the resolved address in the chain array
+
+  Non-resolved entries (module not found, function not in EAT, forwarded
+  export, or no 0xC3 found) are skipped at frame-build time with addr=0.
+  If all entries are unresolved, the TEB is still swapped but no fake
+  frames are written (TEB-swap-only fallback).
+
+  Optional offset field:
+    "stack_spoof_chain": [
+        {"module": "user32.dll", "function": "ZwUserGetMessage", "offset": 0x1C},
+        {"module": "kernel32.dll", "function": "BaseThreadInitThunk", "offset": 0x14}
+    ]
+
+    If offset is 0 or absent, the resolver scans the function body for the
+    last 0xC3 (ret) instruction.  If offset is non-zero, the resolver uses
+    funcRVA + offset directly, trusting the operator's intent.  Offsets
+    that land past the function boundary are silently skipped.
+
+  Example:
+    "stack_spoof_chain": [
+        {"module": "user32.dll", "function": "ZwUserGetMessage"},
+        {"module": "kernel32.dll", "function": "WaitForSingleObject"},
+        {"module": "ntdll.dll", "function": "RtlUserThreadStart"}
+    ]
+
+  If the array is absent or empty, the Python builder prepends the
+  default two-entry chain (ntdll!RtlUserThreadStart, kernel32!BaseThreadInitThunk).
+
+  The resolved addresses are cycled through for num_spoof_frames writes
+  at 0x80-byte intervals near the helper stack bottom (below pivot RSP).
+
+
+=====================================================================
+5. MALLEABLE C2
+=====================================================================
+
+The malleable config controls how beacon traffic is disguised over
+the wire. It can be set globally or per-channel.
+
+  "malleable_config": {
+      "wrapper": {
+          "prefix": "REQ_${RAND_B64:4}_",
+          "suffix": "_${JUNK:8}"
+      },
+      "http_headers": [
+          {"name": "X-Request-ID", "value": "${RAND_B64:16}"}
+      ],
+      "payload_location": {
+          "type": "body",              // body | query_param | path
+          "param_name": "q",           // for query_param
+          "path_prefix": "/assets/",   // for path
+          "path_suffix": ".png",       // for path
+          "body_content_type": "text/plain"  // for body
+      }
+  }
+
+Macros available:
+  ${RAND_B64:N}     N bytes of random data, base64 encoded
+  ${JUNK:N}         N bytes of random junk
+  Variables are expanded at compile time on the beacon side.
+
+
+=====================================================================
+6. TOOLS
+=====================================================================
+
+6a. Config Checker
+─────────────────
+  python3 tools/config_check.py <file>
+
+  Auto-detects config type and validates it. Checks all four config
+  types: server, beacon, known_beacons, operators.
+
+  Exit code 0 = valid, 1 = errors found.
+
+6b. Config Builder
+────────────────
+  python3 tools/config_builder.py Beacon/config/default.json [output_dir]
+
+  Compiles a beacon JSON config into:
+    - <output_dir>/include/generated_config.h  (C++ header + encrypted blob)
+    - <output_dir>/config/default.bin          (raw binary blob)
+    - server/known_beacons.json                (synced server registry)
+
+  If output_dir is omitted, it defaults to "Beacon/config", so the
+  header lands at Beacon/config/include/generated_config.h.
+
+  When run via the Makefile ("make config" or plain "make"), the
+  output_dir is set to "Beacon", so the header goes to
+  Beacon/include/generated_config.h - matching what the Makefile
+  expects.
+
+  Requires: pycryptodome, jsonschema
+
+  Uses XChaCha20-Poly1305 to encrypt the config blob. The encryption
+  key is embedded in the generated C header alongside the blob.
+
+6c. Config Decrypt / Inspect
+─────────────────────────
+  python3 tools/config_decrypt.py Beacon/include/generated_config.h
+  python3 tools/config_decrypt.py Beacon/config/default.bin
+
+  Decrypts and pretty-prints a compiled config blob. Useful for
+  verifying what a beacon binary contains.
+
+  Requires: pycryptodome
+
+6d. Operator Creation
+────────────────────
+  python3 server/run.py create <username>
+  python3 server/run.py create <username> --token <64-hex-token>
+
+  Creates an operator and writes credentials to operators.json
+  (or the file specified in config.json under operators_file).
+  The token is hashed with SHA-256 before storage.
+
+
+=====================================================================
+7. AUTO-GENERATED FILES
+=====================================================================
+
+known_beacons.json
+──────────────────
+  Auto-generated by config_builder.py. Maps beacon IDs to their
+  crypto keys and allowed routes. The server reads this at startup
+  to know which beacons to accept and which paths to listen on.
+  Do not hand-edit this file; let config_builder.py manage it.
+
+  Structure:
+  {
+      "version": 2,
+      "beacons": {
+          "<16-hex-beacon-id>": {
+              "crypto_key": "<64-hex-key>",
+              "allowed_routes": [
+                  {
+                      "transport_type": "HTTPS",
+                      "path": "/api/checkin",
+                      "port": 6767,
+                      "host": "127.0.0.1",
+                      "user_agent": "Mozilla/5.0 ...",
+                      "http_method": "POST"
+                  }
+              ]
+          }
+      }
+  }
+
+  The server aggregates all HTTP(S) paths from all beacons'
+  allowed_routes and registers them automatically at startup.
+  No manual route configuration is needed.
+
+operators.json
+──────────────
+  Auto-generated by "run.py create". Maps operator usernames to
+  SHA-256 hashes of their tokens. Example:
+  {
+      "operators": {
+          "admin": "404a05c7...6296"
+      }
+  }
+
+
+=====================================================================
+8. SSL CERTIFICATES
+=====================================================================
+
+Default paths (relative to server/):
+  ssl/cert.pem
+  ssl/key.pem
+
+Generate a self-signed cert:
+  openssl req -x509 -newkey rsa:4096 -keyout ssl/key.pem \
+    -out ssl/cert.pem -days 365 -nodes \
+    -subj "/CN=Pandragon"
+
+For production, use a real CA-signed cert. Self-signed certs work
+but require the "Skip SSL verification" checkbox in the GUI and
+validate_ssl: false in the beacon config. If you use a reverse proxy
+(Cloudflare, Nginx), you must tell it that the certificate is self-signed.
+
+
+=====================================================================
+9. QUICK START
+=====================================================================
+
+Note: `make` (step 4) automatically runs config_builder.py and compiles
+the beacon, so steps 3-4 below are equivalent to a single `make`.
+
+1. Edit server/config.json (or use the default)
+
+2. Generate SSL certs:
+     cd server && mkdir -p ssl && openssl req -x509 ...
+
+3. Edit Beacon/config/default.json with your C2 domains
+
+4. Build the beacon:
+     make
+   This runs config_builder.py (generates C++ header + syncs
+   known_beacons.json) then compiles pandragon.exe.
+
+5. Validate configs:
+     python3 tools/config_check.py server/config.json
+     python3 tools/config_check.py Beacon/config/default.json
+
+6. Install Python dependencies + build Cython parser:
+     pip install pycryptodome jsonschema
+     python3 -m venv server/venv && source server/venv/bin/activate
+     pip install -r server/requirements.txt
+     pip install -r gui/requirements.txt
+     make server-build-parser
+
+7. Create an operator:
+     cd server && python run.py create admin
+
+8. Start the server:
+     cd server && python run.py
+   (Must be run from server/ dir because SSL certs and data
+    file paths are relative.)
+
+9. Connect the GUI to ws[s]://server:port/ws using operator creds
+
+10. Profit?
+=====================================================================
+                          Footnotes
+=====================================================================
+Initial testing with other C2s and Cloudflare proxying showed that it
+(and probably other load balancers) automatically compress your traffic
+UNLESS your origin server (so Pandragon) uses this HTTP header:
+  Cache-Control: no-transform
+It is set in the default config.
