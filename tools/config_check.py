@@ -52,7 +52,7 @@ def detect_type(config: dict) -> str:
 
 def check_beacon(config: dict, path: str) -> int:
     errors = 0
-    schema_dir = Path(__file__).resolve().parent.parent / "config"
+    schema_dir = Path(__file__).resolve().parent.parent / "Beacon" / "config"
 
     # JSON schema validation
     schema_file = schema_dir / "schema.json"

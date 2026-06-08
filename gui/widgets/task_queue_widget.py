@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QBrush
 
 from gui.api_client import PandragonAPI
 from gui.widgets.beacon_table import BeaconTableWidget
@@ -61,7 +61,7 @@ class TaskQueueWidget(QWidget):
         0x20: "FILE_DOWNLOAD_START", 0x21: "FILE_DOWNLOAD_CHUNK",
         0x22: "FILE_UPLOAD_START", 0x23: "FILE_UPLOAD_CHUNK",
         0x25: "ETW_ENABLE", 0x26: "ETW_DISABLE",
-        0x30: "INJECT", 0x31: "MIGRATE", 0x32: "HOLLOW",
+        0x30: "INJECT",
         0xFF: "DIE",
     }
 

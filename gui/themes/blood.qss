@@ -1,4 +1,4 @@
-/* Pandragon Operator Console — Blood Theme */
+/* Pandragon Operator Console - Blood Theme */
 
 QMainWindow, QWidget#centralWidget {
     background-color: #1a0000;

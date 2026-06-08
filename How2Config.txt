@@ -327,7 +327,7 @@ Full example (Beacon/config/default.json):
   to place on the spoofed Ekko sleep stack. Each entry is resolved at runtime
   (during init, before .text encryption) by:
 
-    1. GetModuleBaseAddressA(module) — PEB walk for already-loaded module
+    1. GetModuleBaseAddressA(module) - PEB walk for already-loaded module
     2. If not loaded -> __LoadLibraryW() loads it dynamically
     3. Parse the module's Export Address Table to locate the function by name
     4. Find the function's end boundary via nearest-neighbor export RVA
@@ -541,8 +541,7 @@ the beacon, so steps 3-4 below are equivalent to a single `make`.
      pip install pycryptodome jsonschema
      python3 -m venv server/venv && source server/venv/bin/activate
      pip install -r server/requirements.txt
-     pip install -r gui/requirements.txt
-     make server-build-parser
+      make server-build-parser
 
 7. Create an operator:
      cd server && python run.py create admin

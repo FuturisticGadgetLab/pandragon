@@ -167,16 +167,20 @@ def _parse_malleable_block(payload: bytes, offset: int, payload_len: int):
     Returns (malleable_dict, bytes_consumed) or None on failure.
     """
     start = offset
-    if offset + 2 > payload_len:
+    if offset + 4 > payload_len:
         return None
 
-    prefix_len = payload[offset]
-    offset += 1
+    # Wrapper prefix (uint16_t LE)
+    prefix_len = payload[offset] | (payload[offset + 1] << 8)
+    offset += 2
     prefix = payload[offset:offset+prefix_len].decode('utf-8', errors='replace') if prefix_len else ''
     offset += prefix_len
 
-    suffix_len = payload[offset]
-    offset += 1
+    # Wrapper suffix (uint16_t LE)
+    if offset + 2 > payload_len:
+        return None
+    suffix_len = payload[offset] | (payload[offset + 1] << 8)
+    offset += 2
     suffix = payload[offset:offset+suffix_len].decode('utf-8', errors='replace') if suffix_len else ''
     offset += suffix_len
 

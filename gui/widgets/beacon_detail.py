@@ -24,7 +24,7 @@ from gui.widgets.notification_overlay import NotificationOverlay
 
 
 class _InfoLabel(QLabel):
-    """Clickable monospace label — copies text to clipboard on click."""
+    """Clickable monospace label - copies text to clipboard on click."""
 
     def __init__(self, text: str = "-"):
         super().__init__(text)

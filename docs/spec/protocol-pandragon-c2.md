@@ -598,7 +598,7 @@ Payload (binary system info):
 [4] ram_mb
 [1] cpu_cores
 [1] ip_count
-[..] ip_count × { [1] len, [len] addr }  (dotted-decimal UTF-8)
+[..] ip_count * { [1] len, [len] addr }  (dotted-decimal UTF-8)
 
 After encryption (PKCS#7 padding applied to inner plaintext):
 [padding: 0-15 bytes] [ciphertext: N bytes] [MAC: 16 bytes]

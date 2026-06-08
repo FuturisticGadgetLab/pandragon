@@ -82,12 +82,12 @@
                                     "prefix": {
                                         "type": "string",
                                         "description": "String to prepend to payload",
-                                        "maxLength": 256
+                                        "maxLength": 65535
                                     },
                                     "suffix": {
                                         "type": "string",
                                         "description": "String to append to payload",
-                                        "maxLength": 256
+                                        "maxLength": 65535
                                     }
                                 },
                                 "additionalProperties": false
@@ -280,6 +280,13 @@
             "maximum": 65535,
             "description": "Maximum PKCS#7 padding length in bytes"
         },
+        "max_response_size": {
+            "type": "integer",
+            "default": 67108864,
+            "minimum": 1048576,
+            "maximum": 1073741824,
+            "description": "Maximum response body size in bytes (default 64MB)"
+        },
         "malleable_config": {
             "type": "object",
             "description": "Malleable network configuration for exfil obfuscation",
@@ -291,12 +298,12 @@
                         "prefix": {
                             "type": "string",
                             "description": "String to prepend to payload",
-                            "maxLength": 256
+                            "maxLength": 65535
                         },
                         "suffix": {
                             "type": "string",
                             "description": "String to append to payload",
-                            "maxLength": 256
+                            "maxLength": 65535
                         }
                     },
                     "additionalProperties": false
@@ -411,6 +418,38 @@
                     "description": "x86 spawnto path"
                 }
             }
+        },
+        "post_build": {
+            "type": "object",
+            "description": "Post-build append configuration (unencrypted strings appended to beacon EXE)",
+            "properties": {
+                "append": {
+                    "type": "array",
+                    "description": "Array of strings to append to the built beacon executable. Each string is written as a separate append block with build-specific magic.",
+                    "items": {
+                        "type": "string",
+                        "maxLength": 65535
+                    },
+                    "maxItems": 64
+                }
+            },
+            "additionalProperties": false
+        },
+        "in_memory_append": {
+            "type": "object",
+            "description": "In-memory append configuration (encrypted in config blob, decrypted at beacon startup)",
+            "properties": {
+                "append": {
+                    "type": "array",
+                    "description": "Array of strings encrypted in config blob and available in memory after beacon startup. Useful for sensitive IOCs/strings.",
+                    "items": {
+                        "type": "string",
+                        "maxLength": 65535
+                    },
+                    "maxItems": 64
+                }
+            },
+            "additionalProperties": false
         }
     }
 }

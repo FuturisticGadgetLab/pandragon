@@ -537,7 +537,7 @@ bool switchChannel(const wchar_t* host,
 //   [4] ram_mb
 //   [1] cpu_cores
 //   [1] ip_count
-//   [..] ip_count × { [1] len, [len] addr }  (dotted-decimal UTF-8)
+//   [..] ip_count * { [1] len, [len] addr }  (dotted-decimal UTF-8)
 //
 // Returns a heap-allocated buffer (caller must __free), or NULL on failure.
 // Sets *out_len to the total byte count.

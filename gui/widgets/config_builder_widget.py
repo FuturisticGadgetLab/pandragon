@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QScrollArea, QTextEdit, QSplitter,
     QDialog, QDialogButtonBox, QMessageBox, QFileDialog,
     QDateEdit, QProgressBar, QListWidget, QListWidgetItem, QStyledItemDelegate,
-    QStyle
+    QStyle, QInputDialog
 )
 from PyQt6.QtCore import Qt, QDate, QThread, pyqtSignal, QObject, QRectF, QSize
 from PyQt6.QtGui import (
@@ -535,6 +535,8 @@ class ConfigBuilderWidget(QWidget):
         self._tabs.addTab(self._build_chain_tab(), "Stack Spoof Chain")
         self._tabs.addTab(self._build_malleable_tab(), "Malleable C2")
         self._tabs.addTab(self._build_workhours_tab(), "Work Hours && Spawn-to")
+        self._tabs.addTab(self._build_postbuild_tab(), "Post-Build")
+        self._tabs.addTab(self._build_preview_tab(), "Request Preview")
         self._tabs.addTab(self._build_build_tab(), "Build")
         layout.addWidget(self._tabs)
 
@@ -615,6 +617,8 @@ class ConfigBuilderWidget(QWidget):
             self._channels_table.setItem(
                 i, 4, QTableWidgetItem(ch.get("http_method", ""))
             )
+        # Keep preview channel dropdown in sync
+        self._populate_preview_channels()
 
     # ── Tab 2: Timing & Obfuscation ─────────────────────────────────
 
@@ -665,19 +669,37 @@ class ConfigBuilderWidget(QWidget):
 
         self._sleep_obf = QComboBox()
         self._sleep_obf.addItems(["none", "ekko", "foliage"])
+        self._sleep_obf.currentTextChanged.connect(self._update_conditional_visibility)
         obf_form.addRow("Method", self._sleep_obf)
 
         self._wipe_pe = QCheckBox("Wipe PE headers during sleep")
         obf_form.addRow(self._wipe_pe)
 
+        # Stack spoofing row (shown only when method != "none")
+        self._stack_spoof_row = QWidget()
+        stack_spoof_layout = QHBoxLayout(self._stack_spoof_row)
+        stack_spoof_layout.setContentsMargins(0, 0, 0, 0)
         self._stack_spoof = QCheckBox("Enable stack spoofing")
-        obf_form.addRow(self._stack_spoof)
+        stack_spoof_layout.addWidget(self._stack_spoof)
+        stack_spoof_layout.addStretch()
+        self._stack_spoof_row.setVisible(False)
+        obf_form.addRow(self._stack_spoof_row)
 
+        # Num Spoof Frames row (shown only when stack spoofing enabled)
+        self._num_frames_row = QWidget()
+        num_frames_layout = QHBoxLayout(self._num_frames_row)
+        num_frames_layout.setContentsMargins(0, 0, 0, 0)
         self._num_frames = QSpinBox()
         self._num_frames.setRange(0, 65535)
         self._num_frames.setValue(6)
         self._num_frames.setToolTip("0 = use default of 6")
-        obf_form.addRow("Num Spoof Frames", self._num_frames)
+        num_frames_layout.addWidget(QLabel("Num Spoof Frames"))
+        num_frames_layout.addWidget(self._num_frames)
+        num_frames_layout.addStretch()
+        self._num_frames_row.setVisible(False)
+        obf_form.addRow(self._num_frames_row)
+
+        self._stack_spoof.toggled.connect(self._update_conditional_visibility)
 
         layout.addWidget(obf_group)
 
@@ -686,19 +708,37 @@ class ConfigBuilderWidget(QWidget):
         sys_form = QFormLayout(sys_group)
 
         self._indirect_sys = QCheckBox("Use indirect syscalls")
+        self._indirect_sys.toggled.connect(self._update_conditional_visibility)
         sys_form.addRow(self._indirect_sys)
 
+        # Pivot API row (shown only when indirect syscalls enabled)
+        self._pivot_row = QWidget()
+        pivot_layout = QHBoxLayout(self._pivot_row)
+        pivot_layout.setContentsMargins(0, 0, 0, 0)
         self._pivot = QLineEdit()
         self._pivot.setPlaceholderText("ZwSetDefaultLocale")
-        sys_form.addRow("Pivot API", self._pivot)
+        pivot_layout.addWidget(QLabel("Pivot API"))
+        pivot_layout.addWidget(self._pivot)
+        pivot_layout.addStretch()
+        self._pivot_row.setVisible(False)
+        sys_form.addRow(self._pivot_row)
 
         self._lazy_checkin = QCheckBox("Lazy check-in")
+        self._lazy_checkin.toggled.connect(self._update_conditional_visibility)
         sys_form.addRow(self._lazy_checkin)
 
+        # Lazy Check-in Max row (shown only when lazy check-in enabled)
+        self._lazy_checkin_max_row = QWidget()
+        lazy_max_layout = QHBoxLayout(self._lazy_checkin_max_row)
+        lazy_max_layout.setContentsMargins(0, 0, 0, 0)
         self._lazy_checkin_max = QSpinBox()
         self._lazy_checkin_max.setRange(1, 255)
         self._lazy_checkin_max.setValue(2)
-        sys_form.addRow("Lazy Check-in Max", self._lazy_checkin_max)
+        lazy_max_layout.addWidget(QLabel("Lazy Check-in Max"))
+        lazy_max_layout.addWidget(self._lazy_checkin_max)
+        lazy_max_layout.addStretch()
+        self._lazy_checkin_max_row.setVisible(False)
+        sys_form.addRow(self._lazy_checkin_max_row)
 
         self._lazy_unhook = QCheckBox("Lazy unhook (transparent)")
         sys_form.addRow(self._lazy_unhook)
@@ -725,7 +765,22 @@ class ConfigBuilderWidget(QWidget):
 
         layout.addStretch()
         scroll.setWidget(container)
+        # Initial conditional visibility
+        self._update_conditional_visibility()
         return scroll
+
+    def _update_conditional_visibility(self):
+        """Show/hide conditional fields based on current widget state."""
+        # Stack spoofing fields: visible when sleep obf method != "none"
+        obf_method = self._sleep_obf.currentText()
+        self._stack_spoof_row.setVisible(obf_method != "none")
+        self._num_frames_row.setVisible(obf_method != "none" and self._stack_spoof.isChecked())
+
+        # Pivot API: visible when indirect syscalls enabled
+        self._pivot_row.setVisible(self._indirect_sys.isChecked())
+
+        # Lazy Check-in Max: visible when lazy check-in enabled
+        self._lazy_checkin_max_row.setVisible(self._lazy_checkin.isChecked())
 
     # ── Tab 3: Stack Spoof Chain ────────────────────────────────────
 
@@ -962,16 +1017,27 @@ class ConfigBuilderWidget(QWidget):
         container.setObjectName("configTab")
         layout = QVBoxLayout(container)
 
+        # Channel selector for per-channel malleable config
+        ch_sel_row = QHBoxLayout()
+        ch_sel_row.addWidget(QLabel("Edit malleable config for:"))
+        self._malleable_channel = QComboBox()
+        self._malleable_channel.currentIndexChanged.connect(self._on_malleable_channel_changed)
+        ch_sel_row.addWidget(self._malleable_channel)
+        ch_sel_row.addStretch()
+        layout.addLayout(ch_sel_row)
+
         # Wrapper
         wrap_group = QGroupBox("Wrapper (prefix/suffix)")
         wrap_form = QFormLayout(wrap_group)
 
         self._wrap_prefix = QLineEdit()
         self._wrap_prefix.setPlaceholderText("REQ_${RAND_B64:4}_")
+        self._wrap_prefix.setMaxLength(65535)
         wrap_form.addRow("Prefix", self._wrap_prefix)
 
         self._wrap_suffix = QLineEdit()
         self._wrap_suffix.setPlaceholderText("_${JUNK:8}")
+        self._wrap_suffix.setMaxLength(65535)
         wrap_form.addRow("Suffix", self._wrap_suffix)
 
         layout.addWidget(wrap_group)
@@ -1025,7 +1091,59 @@ class ConfigBuilderWidget(QWidget):
         layout.addWidget(pl_group)
         layout.addStretch()
         scroll.setWidget(container)
+
+        # Initial population
+        self._populate_malleable_channels()
         return scroll
+
+    def _populate_malleable_channels(self):
+        """Populate the channel dropdown for malleable config editing."""
+        self._malleable_channel.blockSignals(True)
+        self._malleable_channel.clear()
+        channels = self._config.get("c2_channels", [])
+        for i, ch in enumerate(channels):
+            ch_type = ch.get("type", "HTTP")
+            host = ch.get("host", "")
+            port = ch.get("port", 0)
+            label = f"{i+1}. {ch_type}  {host}:{port}"
+            self._malleable_channel.addItem(label, ("channel", i))
+        # Global entry last
+        self._malleable_channel.addItem("Global (fallback)", ("global", None))
+        self._malleable_channel.blockSignals(False)
+
+    def _get_malleable_target(self) -> tuple[dict, str]:
+        """
+        Get the malleable config dict being edited based on current dropdown selection.
+        Returns (malleable_config_dict, target_type) where target_type is "channel:N" or "global".
+        """
+        data = self._malleable_channel.currentData()
+        if not data:
+            return self._config.setdefault("malleable_config", {}), "global"
+        target_type, idx = data
+        if target_type == "channel":
+            channel = self._config.setdefault("c2_channels", [{}])[idx]
+            return channel.setdefault("malleable_config", {}), f"channel:{idx}"
+        return self._config.setdefault("malleable_config", {}), "global"
+
+    def _on_malleable_channel_changed(self):
+        """Refresh all malleable tab fields when channel selection changes."""
+        self._refresh_malleable_fields()
+
+    def _refresh_malleable_fields(self):
+        """Refresh all malleable tab fields from the currently selected target."""
+        mc, target = self._get_malleable_target()
+        wrapper = mc.get("wrapper", {})
+        self._wrap_prefix.setText(wrapper.get("prefix", ""))
+        self._wrap_suffix.setText(wrapper.get("suffix", ""))
+        # Headers
+        self._refresh_headers_table()
+        # Payload location
+        pl = mc.get("payload_location", {})
+        self._pl_type.setCurrentText(pl.get("type", "body"))
+        self._pl_param.setText(pl.get("param_name", "q"))
+        self._pl_path_prefix.setText(pl.get("path_prefix", ""))
+        self._pl_path_suffix.setText(pl.get("path_suffix", ""))
+        self._pl_body_ct.setCurrentText(pl.get("body_content_type", "text/plain"))
 
     def _header_add(self):
         dialog = QDialog(self)
@@ -1055,21 +1173,21 @@ class ConfigBuilderWidget(QWidget):
         if not name:
             return
 
-        mc = self._config.setdefault("malleable_config", {})
+        mc, _ = self._get_malleable_target()
         headers = mc.setdefault("http_headers", [])
         headers.append({"name": name, "value": value})
         self._refresh_headers_table()
 
     def _header_remove(self):
         row = self._headers_table.currentRow()
-        mc = self._config.get("malleable_config", {})
+        mc, _ = self._get_malleable_target()
         headers = mc.get("http_headers", [])
         if 0 <= row < len(headers):
             del headers[row]
             self._refresh_headers_table()
 
     def _refresh_headers_table(self):
-        mc = self._config.get("malleable_config", {})
+        mc, _ = self._get_malleable_target()
         headers = mc.get("http_headers", [])
         self._headers_table.setRowCount(len(headers))
         for i, h in enumerate(headers):
@@ -1135,6 +1253,308 @@ class ConfigBuilderWidget(QWidget):
         layout.addStretch()
         scroll.setWidget(container)
         return scroll
+
+    # ── Tab: Post-Build ───────────────────────────────────────────────
+
+    def _build_postbuild_tab(self) -> QWidget:
+        tab = QWidget()
+        tab.setObjectName("configTab")
+        layout = QVBoxLayout(tab)
+
+        # Post-Build Append (unencrypted, IOC markers)
+        post_group = QGroupBox("Post-Build Append - Unencrypted IOC markers")
+        post_form = QFormLayout(post_group)
+
+        self._post_append_list = QListWidget()
+        self._post_append_list.setMaximumHeight(120)
+        post_form.addRow("Strings:", self._post_append_list)
+
+        post_btn_row = QHBoxLayout()
+        self._post_add = QPushButton("Add")
+        self._post_add.clicked.connect(self._post_append_add)
+        post_btn_row.addWidget(self._post_add)
+
+        self._post_remove = QPushButton("Remove")
+        self._post_remove.clicked.connect(self._post_append_remove)
+        post_btn_row.addWidget(self._post_remove)
+
+        post_btn_row.addStretch()
+        post_form.addRow(post_btn_row)
+
+        post_info = QLabel("Appended to binary post-build as [MAGIC:4][LEN:4][DATA:N]. Not encrypted. Visible in strings output.")
+        post_info.setWordWrap(True)
+        post_info.setStyleSheet("color: #888; font-size: 10px;")
+        post_form.addRow(post_info)
+
+        layout.addWidget(post_group)
+
+        # In-Memory Append (encrypted in config blob, decrypted at runtime)
+        inmem_group = QGroupBox("In-Memory Append - Encrypted config strings")
+        inmem_form = QFormLayout(inmem_group)
+
+        self._inmem_append_list = QListWidget()
+        self._inmem_append_list.setMaximumHeight(120)
+        inmem_form.addRow("Strings:", self._inmem_append_list)
+
+        inmem_btn_row = QHBoxLayout()
+        self._inmem_add = QPushButton("Add")
+        self._inmem_add.clicked.connect(self._inmem_append_add)
+        inmem_btn_row.addWidget(self._inmem_add)
+
+        self._inmem_remove = QPushButton("Remove")
+        self._inmem_remove.clicked.connect(self._inmem_append_remove)
+        inmem_btn_row.addWidget(self._inmem_remove)
+
+        inmem_btn_row.addStretch()
+        inmem_form.addRow(inmem_btn_row)
+
+        inmem_info = QLabel("Encrypted in config blob, decrypted at beacon startup. Not visible in binary strings.")
+        inmem_info.setWordWrap(True)
+        inmem_info.setStyleSheet("color: #888; font-size: 10px;")
+        inmem_form.addRow(inmem_info)
+
+        layout.addWidget(inmem_group)
+
+        layout.addStretch()
+        return tab
+
+    def _post_append_add(self):
+        text, ok = QInputDialog.getText(self, "Add Post-Build String", "String:")
+        if ok and text:
+            self._post_append_list.addItem(text)
+            self._sync_post_append_list()
+
+    def _post_append_remove(self):
+        row = self._post_append_list.currentRow()
+        if row >= 0:
+            self._post_append_list.takeItem(row)
+            self._sync_post_append_list()
+
+    def _inmem_append_add(self):
+        text, ok = QInputDialog.getText(self, "Add In-Memory String", "String:")
+        if ok and text:
+            self._inmem_append_list.addItem(text)
+            self._sync_inmem_append_list()
+
+    def _inmem_append_remove(self):
+        row = self._inmem_append_list.currentRow()
+        if row >= 0:
+            self._inmem_append_list.takeItem(row)
+            self._sync_inmem_append_list()
+
+    def _sync_post_append_list(self):
+        self._config["post_build"] = {"append": [self._post_append_list.item(i).text() for i in range(self._post_append_list.count())]}
+
+    def _sync_inmem_append_list(self):
+        self._config["in_memory_append"] = {"append": [self._inmem_append_list.item(i).text() for i in range(self._inmem_append_list.count())]}
+
+    # ── Tab: Request Preview ─────────────────────────────────────────────
+
+    def _build_preview_tab(self) -> QWidget:
+        tab = QWidget()
+        tab.setObjectName("configTab")
+        layout = QVBoxLayout(tab)
+
+        # Controls
+        ctrl_row = QHBoxLayout()
+        self._preview_refresh = QPushButton("Refresh Preview")
+        self._preview_refresh.clicked.connect(self._refresh_preview)
+        ctrl_row.addWidget(self._preview_refresh)
+
+        # Channel selector (handles multiple C2 channels)
+        self._preview_channel = QComboBox()
+        self._preview_channel.currentIndexChanged.connect(self._refresh_preview)
+        ctrl_row.addWidget(QLabel("Channel:"))
+        ctrl_row.addWidget(self._preview_channel)
+
+        self._preview_profile = QComboBox()
+        self._preview_profile.addItems(["Check-in (GET)", "Check-in (POST)", "Task Result (POST)", "File Upload (POST)"])
+        self._preview_profile.currentTextChanged.connect(self._refresh_preview)
+        ctrl_row.addWidget(QLabel("Profile:"))
+        ctrl_row.addWidget(self._preview_profile)
+        ctrl_row.addStretch()
+        layout.addLayout(ctrl_row)
+
+        # Mal Mode indicator (read-only label showing effective mode)
+        self._preview_mode_label = QLabel("Mode: -")
+        self._preview_mode_label.setStyleSheet("color: #9cdcfe; font-family: Consolas; font-size: 9pt;")
+        ctrl_row.addWidget(self._preview_mode_label)
+
+        # Request display
+        from PyQt6.QtWidgets import QTextEdit
+        self._preview_text = QTextEdit()
+        self._preview_text.setReadOnly(True)
+        self._preview_text.setFont(QFont("Consolas", 9))
+        self._preview_text.setStyleSheet("background-color: #1a1a1a; color: #e0e0e0; border: 1px solid #333;")
+        layout.addWidget(self._preview_text)
+
+        # Initial render (populate channel dropdown first)
+        self._populate_preview_channels()
+        self._refresh_preview()
+        return tab
+
+    def _populate_preview_channels(self):
+        """Populate the channel dropdown with all configured C2 channels."""
+        self._preview_channel.blockSignals(True)
+        self._preview_channel.clear()
+        channels = self._config.get("c2_channels", [])
+        for i, ch in enumerate(channels):
+            ch_type = ch.get("type", "HTTP")
+            host = ch.get("host", "")
+            port = ch.get("port", 0)
+            label = f"{i+1}. {ch_type}  {host}:{port}"
+            self._preview_channel.addItem(label, i)
+        self._preview_channel.blockSignals(False)
+
+    def _get_effective_malleable(self, channel: dict) -> tuple[dict, str]:
+        """
+        Determine the effective malleable config for a channel based on malleable_mode logic.
+        Returns (malleable_config_dict, mode_string).
+        """
+        c = self._config
+        ch_type = channel.get("type", "HTTP")
+
+        # TCP (3) and PIPE (4) channels have no malleable config
+        if ch_type in ("TCP", "PIPE"):
+            return {}, "NONE (TCP/PIPE)"
+
+        # Check for per-channel malleable_config
+        ch_malleable = channel.get("malleable_config")
+        if ch_malleable:
+            return ch_malleable, "INLINE (per-channel)"
+
+        # Fall back to global malleable_config
+        global_malleable = c.get("malleable_config", {})
+        if global_malleable:
+            return global_malleable, "GLOBAL"
+
+        return {}, "NONE"
+
+    def _refresh_preview(self):
+        """Generate and display a preview HTTP request based on current config."""
+        import random
+        import base64
+        import time
+
+        c = self._config
+        channels = c.get("c2_channels", [{}])
+
+        # Get selected channel index
+        ch_idx = self._preview_channel.currentData()
+        if ch_idx is None or ch_idx >= len(channels):
+            ch_idx = 0
+        ch = channels[ch_idx]
+
+        # Determine effective malleable config and mode
+        mc, mode_str = self._get_effective_malleable(ch)
+        self._preview_mode_label.setText(f"Mode: {mode_str}")
+
+        wrapper = mc.get("wrapper", {})
+
+        # Sample beacon data
+        beacon_id = "a1b2c3d4"
+        session_id = random.randint(1, 0xFFFFFFFF)
+        timestamp = int(time.time())
+        rand_b64_4 = base64.b64encode(random.randbytes(3)).decode()[:4]
+        rand_b64_8 = base64.b64encode(random.randbytes(6)).decode()[:8]
+        junk_8 = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", k=8))
+
+        # Macro expansions
+        macros = {
+            "${BEACON_ID}": beacon_id,
+            "${SESSION_ID}": f"{session_id:08x}",
+            "${TIMESTAMP}": str(timestamp),
+            "${RAND_B64:4}": rand_b64_4,
+            "${RAND_B64:8}": rand_b64_8,
+            "${JUNK:8}": junk_8,
+            "${JUNK:16}": junk_8 + junk_8,
+        }
+
+        def expand(text: str) -> str:
+            for k, v in macros.items():
+                text = text.replace(k, v)
+            return text
+
+        # Build request components
+        profile = self._preview_profile.currentText()
+        method = ch.get("http_method", "POST")
+        host = ch.get("host", "127.0.0.1")
+        port = ch.get("port", 6767)
+        path = ch.get("path", "/api/checkin")
+        ua = ch.get("user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+        # Apply wrapper
+        prefix = expand(wrapper.get("prefix", ""))
+        suffix = expand(wrapper.get("suffix", ""))
+
+        # Payload location
+        pl = mc.get("payload_location", {})
+        pl_type = pl.get("type", "body")
+        pl_param = pl.get("param_name", "q")
+        pl_path_prefix = pl.get("path_prefix", "")
+        pl_path_suffix = pl.get("path_suffix", "")
+        pl_body_ct = pl.get("body_content_type", "text/plain")
+
+        # Sample encrypted payload (base64)
+        sample_payload = base64.b64encode(b"\x00" * 64).decode()
+
+        # Expand path
+        req_path = expand(pl_path_prefix + path + pl_path_suffix)
+
+        headers = {
+            "User-Agent": expand(ua),
+            "Host": f"{host}:{port}",
+        }
+
+        # Custom headers (macro-expanded like the beacon does)
+        for hdr in mc.get("http_headers", []):
+            headers[expand(hdr.get("name", ""))] = expand(hdr.get("value", ""))
+
+        # Build request
+        if pl_type == "query_param":
+            sep = "&" if "?" in req_path else "?"
+            req_path += f"{sep}{pl_param}={sample_payload}"
+            body = ""
+            ct = ""
+        elif pl_type == "path":
+            # Payload in path suffix already handled
+            body = ""
+            ct = ""
+        else:  # body
+            body = prefix + sample_payload + suffix
+            ct = pl_body_ct
+
+        # HTTP request lines
+        lines = []
+        lines.append(f"{method} {req_path} HTTP/1.1")
+        for k, v in headers.items():
+            lines.append(f"{k}: {v}")
+        if ct:
+            lines.append(f"Content-Type: {ct}")
+        if body:
+            lines.append(f"Content-Length: {len(body)}")
+        lines.append("")
+        if body:
+            lines.append(body)
+
+        request_text = "\r\n".join(lines)
+
+        # Display with color hints (using HTML)
+        html = f"""
+        <pre style="font-family: Consolas, monospace; font-size: 10pt; color: #e0e0e0;">
+        <span style="color: #4ec9b0;">{method} {req_path} HTTP/1.1</span>
+        """
+        for k, v in headers.items():
+            html += f'\n<span style="color: #9cdcfe;">{k}</span>: <span style="color: #ce9178;">{v}</span>'
+        if ct:
+            html += f'\n<span style="color: #9cdcfe;">Content-Type</span>: <span style="color: #ce9178;">{ct}</span>'
+        if body:
+            html += f'\n<span style="color: #9cdcfe;">Content-Length</span>: <span style="color: #ce9178;">{len(body)}</span>'
+        html += "\n"
+        if body:
+            html += f'\n<span style="color: #dcdcaa;">{body[:200]}{"..." if len(body) > 200 else ""}</span>'
+
+        self._preview_text.setHtml(html)
 
     # ── Tab 6: Build ────────────────────────────────────────────────
 
@@ -1314,7 +1734,8 @@ class ConfigBuilderWidget(QWidget):
         c["options"]["validate_ssl"] = self._opt_validate_ssl.isChecked()
 
         c.setdefault("malleable_config", {})
-        mc = c["malleable_config"]
+        # Sync malleable tab fields to the currently selected target (channel or global)
+        mc, _ = self._get_malleable_target()
         mc.setdefault("wrapper", {})
         mc["wrapper"]["prefix"] = self._wrap_prefix.text().strip()
         mc["wrapper"]["suffix"] = self._wrap_suffix.text().strip()
@@ -1333,8 +1754,12 @@ class ConfigBuilderWidget(QWidget):
         c["work_hours"]["end_minute"] = self._wh_end_m.value()
         c["work_hours"]["insomnia"] = self._wh_insomnia.isChecked()
 
+        c.setdefault("spawnto", {})
         c["spawnto"]["x64"] = self._st_x64.text().strip()
         c["spawnto"]["x86"] = self._st_x86.text().strip()
+
+        c["post_build"] = {"append": [self._post_append_list.item(i).text() for i in range(self._post_append_list.count())]}
+        c["in_memory_append"] = {"append": [self._inmem_append_list.item(i).text() for i in range(self._inmem_append_list.count())]}
 
     def _sync_config_to_form(self):
         """Populate widget values from self._config dict."""
@@ -1372,19 +1797,12 @@ class ConfigBuilderWidget(QWidget):
         self._opt_bypass_etw.setChecked(opts.get("bypass_etw", False))
         self._opt_validate_ssl.setChecked(opts.get("validate_ssl", False))
 
-        mc = c.get("malleable_config", {})
-        wrapper = mc.get("wrapper", {})
-        self._wrap_prefix.setText(wrapper.get("prefix", ""))
-        self._wrap_suffix.setText(wrapper.get("suffix", ""))
+        # Populate malleable tab from currently selected target
+        self._populate_malleable_channels()
+        self._refresh_malleable_fields()
 
-        pl = mc.get("payload_location", {})
-        self._pl_type.setCurrentText(pl.get("type", "body"))
-        self._pl_param.setText(pl.get("param_name", ""))
-        self._pl_path_prefix.setText(pl.get("path_prefix", ""))
-        self._pl_path_suffix.setText(pl.get("path_suffix", ""))
-        self._pl_body_ct.setCurrentText(
-            pl.get("body_content_type", "text/plain")
-        )
+        # Update conditional visibility after loading config values
+        self._update_conditional_visibility()
 
         wh = c.get("work_hours", {})
         self._wh_enabled.setChecked(wh.get("enabled", False))
@@ -1397,6 +1815,18 @@ class ConfigBuilderWidget(QWidget):
         st = c.get("spawnto", {})
         self._st_x64.setText(st.get("x64", ""))
         self._st_x86.setText(st.get("x86", ""))
+
+        # Post-Build Append
+        self._post_append_list.clear()
+        post_build = c.get("post_build", {})
+        for s in post_build.get("append", []):
+            self._post_append_list.addItem(s)
+
+        # In-Memory Append
+        self._inmem_append_list.clear()
+        inmem = c.get("in_memory_append", {})
+        for s in inmem.get("append", []):
+            self._inmem_append_list.addItem(s)
 
         self._refresh_channels_table()
         self._refresh_chain_stack()

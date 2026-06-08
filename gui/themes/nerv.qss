@@ -1,4 +1,4 @@
-/* Pandragon Operator Console — NERV / Evangelion Theme */
+/* Pandragon Operator Console - NERV / Evangelion Theme */
 
 QMainWindow, QWidget#centralWidget {
     background-color: #000000;

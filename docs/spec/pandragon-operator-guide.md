@@ -166,4 +166,3 @@ Recommended settings for high-value targets:
 | `download` | 🟡 Medium | Use small chunk sizes to blend traffic. |
 | `bof_exec`| 🟡 Medium | Verify BOF logic before running. |
 | `inject` | 🔴 High | Target stable system processes only. |
-| `hollow` | 🚨 Critical | **Avoid** unless strictly necessary for migration. |

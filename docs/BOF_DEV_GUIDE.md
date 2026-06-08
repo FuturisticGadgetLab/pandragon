@@ -344,7 +344,7 @@ void BeaconInjectProcess(HANDLE hProcess, int pid, char* payload,
                          char* arg, int arg_len);
 ```
 
-Inject shellcode into a target process. Uses Pandragon's process hollowing / classic injection implementation.
+Inject shellcode into a target process using classic process injection.
 
 #### `BeaconInjectTemporaryProcess`
 

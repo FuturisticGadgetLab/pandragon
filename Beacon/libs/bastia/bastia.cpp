@@ -664,9 +664,9 @@ int xchacha20poly1305_self_test_vector2(void)
      * wrapper uses for the actual plaintext encryption).
      *
      * Additionally exercises:
-     *   – clen < 16  -> -1
-     *   – tampered tag  -> -2
-     *   – tampered ciphertext  -> -2
+     *   clen < 16  -> -1
+     *   tampered tag  -> -2
+     *   tampered ciphertext  -> -2
      */
 
     static const uint8_t key[32] = {

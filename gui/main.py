@@ -22,7 +22,6 @@ from gui.theme import ThemeManager
 from gui.widgets.beacon_table import BeaconTableWidget
 from gui.widgets.beacon_detail import BeaconDetailWidget
 from gui.widgets.task_queue_widget import TaskQueueWidget
-from gui.widgets.relay_widget import RelayWidget
 from gui.widgets.beacon_graph_widget import BeaconGraphWidget
 from gui.widgets.config_builder_widget import ConfigBuilderWidget
 from gui.widgets.bof_repository_widget import BOFRepositoryWidget
@@ -67,36 +66,40 @@ _CHECK_STYLE = (
     "}"
     "QCheckBox::indicator:checked { background-color: #555; }"
 )
-_CONNECT_BTN_STYLE = (
-    "QPushButton#connectBtn {"
-    "  background-color: #1a3a1a;"
-    "  border: 1px solid #2a5a2a;"
-    "  color: #8f8;"
-    "  padding: 6px 12px;"
-    "}"
-    "QPushButton#connectBtn:hover { border: 1px solid #4a8a4a; }"
-    "QPushButton#connectBtn:disabled { color: #353; border: 1px solid #1a2a1a; }"
-)
-_CANCEL_BTN_STYLE = (
-    "QPushButton#cancelBtn {"
-    "  background-color: #2a1a1a;"
-    "  border: 1px solid #4a2a2a;"
-    "  color: #f88;"
-    "  padding: 6px 12px;"
-    "}"
-    "QPushButton#cancelBtn:hover { border: 1px solid #8a4a4a; }"
-)
 _TOKEN_BTN_STYLE = (
     "QPushButton#tokenToggle {"
     "  background-color: #252525;"
     "  border: 1px solid #444;"
     "  border-left: none;"
     "  color: #888;"
-    "  padding: 6px 8px;"
-    "  min-width: 48px;"
+    "  padding: 6px 6px;"
+    "  min-width: 40px;"
+    "  max-width: 48px;"
+    "  font-size: 9px;"
+    "  font-weight: bold;"
     "}"
     "QPushButton#tokenToggle:hover { color: #ccc; border: 1px solid #888; border-left: none; }"
     "QPushButton#tokenToggle:checked { color: #e0e0e0; }"
+)
+_CONNECT_BTN_STYLE = (
+    "QPushButton#connectBtn {"
+    "  background-color: #1a1a1a;"
+    "  border: 1px solid #333;"
+    "  color: #e0e0e0;"
+    "  padding: 8px 16px;"
+    "  font-weight: bold;"
+    "}"
+    "QPushButton#connectBtn:hover { border: 1px solid #666; background-color: #222; }"
+    "QPushButton#connectBtn:disabled { color: #555; border: 1px solid #2a2a2a; background: #1a1a1a; }"
+)
+_CANCEL_BTN_STYLE = (
+    "QPushButton#cancelBtn {"
+    "  background-color: #1a1a1a;"
+    "  border: 1px solid #444;"
+    "  color: #aaa;"
+    "  padding: 8px 16px;"
+    "}"
+    "QPushButton#cancelBtn:hover { border: 1px solid #888; color: #e0e0e0; }"
 )
 _PROGRESS_STYLE = (
     "QWidget#SplashScreen { background: transparent; }"
@@ -157,19 +160,20 @@ class ConnectPanel(QWidget):
         form.addWidget(self._username, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         token_row = QHBoxLayout()
+        token_row.setSpacing(0)
         self._token = QLineEdit(saved.get("last_token", ""))
         self._token.setPlaceholderText("Token (required)")
         self._token.setFont(_MONO)
         self._token.setStyleSheet(_INPUT_STYLE + "QLineEdit { border-right: none; }")
-        self._token.setFixedWidth(form_w - 48)
+        self._token.setFixedWidth(form_w - 56)
         self._token.returnPressed.connect(self._do_connect)
         token_row.addWidget(self._token)
 
         self._token_toggle = QPushButton("SHOW")
         self._token_toggle.setObjectName("tokenToggle")
-        self._token_toggle.setFont(_MONO)
+        self._token_toggle.setFont(_MONO_BOLD)
         self._token_toggle.setStyleSheet(_TOKEN_BTN_STYLE)
-        self._token_toggle.setFixedSize(48, self._token.sizeHint().height() + 14)
+        self._token_toggle.setFixedHeight(self._token.sizeHint().height() + 4)
         self._token_toggle.setCheckable(True)
         self._token_toggle.clicked.connect(self._toggle_token_visibility)
         token_row.addWidget(self._token_toggle)
@@ -201,19 +205,20 @@ class ConnectPanel(QWidget):
         form.addSpacing(4)
 
         btn_row = QHBoxLayout()
-        self._connect_btn = QPushButton("Connect")
+        btn_row.setSpacing(8)
+        self._connect_btn = QPushButton("CONNECT")
         self._connect_btn.setObjectName("connectBtn")
         self._connect_btn.setFont(_MONO_BOLD)
         self._connect_btn.setStyleSheet(_CONNECT_BTN_STYLE)
-        self._connect_btn.setMinimumHeight(32)
+        self._connect_btn.setMinimumHeight(36)
         self._connect_btn.clicked.connect(self._do_connect)
         btn_row.addWidget(self._connect_btn)
 
-        self._cancel_btn = QPushButton("Cancel")
+        self._cancel_btn = QPushButton("CANCEL")
         self._cancel_btn.setObjectName("cancelBtn")
-        self._cancel_btn.setFont(_MONO)
+        self._cancel_btn.setFont(_MONO_BOLD)
         self._cancel_btn.setStyleSheet(_CANCEL_BTN_STYLE)
-        self._cancel_btn.setMinimumHeight(32)
+        self._cancel_btn.setMinimumHeight(36)
         self._cancel_btn.clicked.connect(self._cancel_connect)
         self._cancel_btn.setVisible(False)
         btn_row.addWidget(self._cancel_btn)
@@ -246,7 +251,7 @@ class ConnectPanel(QWidget):
             self._connecting_api.disconnect()
             self._connecting_api = None
         self._cancel_btn.setVisible(False)
-        self._connect_btn.setText("Connect")
+        self._connect_btn.setText("CONNECT")
         self._connect_btn.setEnabled(True)
         self._progress.clear_stages()
         self._progress.add_stage("Connection cancelled", "info")
@@ -266,7 +271,7 @@ class ConnectPanel(QWidget):
         self._progress.add_stage("Connecting to teamserver...", "busy")
         self._progress.add_stage("Authenticating...", "busy")
 
-        self._connect_btn.setText("Connecting...")
+        self._connect_btn.setText("CONNECTING...")
         self._connect_btn.setEnabled(False)
         self._cancel_btn.setVisible(True)
 
@@ -286,7 +291,7 @@ class ConnectPanel(QWidget):
             self._progress.clear_stages()
             self._progress.add_stage(msg, "fail")
             self._progress.add_stage("Check your connection details and try again", "info")
-            self._connect_btn.setText("Connect")
+            self._connect_btn.setText("CONNECT")
             self._connect_btn.setEnabled(True)
             self._cancel_btn.setVisible(False)
             self._connecting_api = None
@@ -443,11 +448,8 @@ class MainWindow(QMainWindow):
         self.beacon_table.task_queue = self.task_queue
         tabs.addTab(self.task_queue, "Task Queue")
 
-        self.relay_widget = RelayWidget(api, self)
-        tabs.addTab(self.relay_widget, "P2P Relay")
-
         self.graph_widget = BeaconGraphWidget(api, self)
-        tabs.addTab(self.graph_widget, "Topology Graph")
+        tabs.addTab(self.graph_widget, "Pivot Graph")
 
         self.config_builder = ConfigBuilderWidget(self)
         self.config_builder.set_api(api)
@@ -465,12 +467,12 @@ class MainWindow(QMainWindow):
         self.beacon_table.set_notification_overlay(self.notifications)
         self.beacon_detail.set_notification_overlay(self.notifications)
         self.task_queue.set_notification_overlay(self.notifications)
-        self.relay_widget.set_notification_overlay(self.notifications)
         self.graph_widget.set_notification_overlay(self.notifications)
         self.bof_repo.set_notification_overlay(self.notifications)
 
         self._build_post_connect_ui()
         self._wire_events()
+        self._set_connection_status(True)
 
         self._crossfade(1, 2, duration=400, callback=self._after_tabs_fade)
         self.beacon_table.refresh()
@@ -479,7 +481,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self.resize(1280, 800))
 
     def _build_post_connect_ui(self):
-        """Build status bar — only after connection. No menu bar."""
+        """Build status bar - only after connection. No menu bar."""
         sb = self.statusBar()
 
         # Left side: status + operator (addWidget = left-aligned)
@@ -518,21 +520,6 @@ class MainWindow(QMainWindow):
         sb.addPermanentWidget(brand)
         self._status_bar_widgets.append(brand)
 
-        sep3 = QLabel("  |  ")
-        sep3.setStyleSheet("color: #444;")
-        sb.addPermanentWidget(sep3)
-        self._status_bar_widgets.append(sep3)
-
-        theme_lbl = QLabel("Theme:")
-        theme_lbl.setFont(_MONO)
-        theme_lbl.setStyleSheet("color: #666;")
-        sb.addPermanentWidget(theme_lbl)
-        self._status_bar_widgets.append(theme_lbl)
-
-        theme_switcher = self.theme_mgr.make_switcher()
-        sb.addPermanentWidget(theme_switcher)
-        self._status_bar_widgets.append(theme_switcher)
-
     def _on_graph_node_selected(self, beacon_id):
         tabs = self._tabs
         if tabs:
@@ -541,7 +528,6 @@ class MainWindow(QMainWindow):
         self.beacon_detail.update_beacon(beacon_id)
 
     def _wire_events(self):
-        self.relay_widget.relay_updated.connect(self.graph_widget.refresh)
         self.beacon_table.beacon_selected.connect(self.beacon_detail.update_beacon)
         self.graph_widget.node_selected.connect(self._on_graph_node_selected)
 

@@ -606,8 +606,6 @@ void CommandDispatcher::initializeBuiltInHandlers() {
     registerHandler(0x25, handleEtwEnable);
     registerHandler(0x26, handleEtwDisable);
     registerHandler(0x30, handleInjectProcess);
-    registerHandler(0x31, handleMigrate);
-    registerHandler(0x32, handleHollowProcess);
 
     // Relay opcodes
     registerHandler(0x40, handleStartRelay);

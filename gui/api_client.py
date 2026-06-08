@@ -108,6 +108,7 @@ class PandragonAPI(QObject):
             return False
 
         if self._auth_result and self._auth_result.get('success'):
+            self._running = True
             self._authenticated = True
             self._reconnect_delay = 1.0
             self.connected.emit()
@@ -352,6 +353,17 @@ class PandragonAPI(QObject):
         return self._send_and_check({
             'type': 'delete_bof',
             'filename': filename,
+        })
+
+    def execute_pe(self, beacon_id: str, pe_data_b64: str, pe_filename: str,
+                   arch: int = 2, bypass: int = 3) -> dict:
+        return self._send_and_check({
+            'type': 'execute_pe',
+            'beacon_id': beacon_id,
+            'pe_data': pe_data_b64,
+            'pe_filename': pe_filename,
+            'arch': arch,
+            'bypass': bypass,
         })
 
     def register_beacon(self, beacon_id: str, crypto_key: str, allowed_routes: list) -> dict:

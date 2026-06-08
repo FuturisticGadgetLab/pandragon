@@ -1,5 +1,5 @@
 """
-GUI state persistence — loads/saves gui/.state.json
+GUI state persistence - loads/saves gui/.state.json
 
 Stores last-used theme, connection details, and other UI preferences
 inside the gui/ directory (no ~/.config dependency).

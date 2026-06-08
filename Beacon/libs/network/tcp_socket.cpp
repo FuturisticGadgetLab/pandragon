@@ -18,6 +18,7 @@
 #include "../../include/network/transport.h"
 #include "../../include/utils.h"
 #include "../bastia/bastia.h"
+#include "../../include/pandragon_runtime.h"
 /* NOTE: Do NOT include winsock2.h/ws2tcpip.h here.
  * All Winsock types (SOCKADDR_IN, fd_set, etc.) are already provided
  * by resolver.h via transport.h. Including them causes redefinition errors. */
@@ -285,9 +286,13 @@ std::pair<void*, size_t> tcpSocketRequest(
         return { nullptr, 0 };
     }
 
-    // Sanity check: cap at 64MB to avoid allocation bombs
-    if (respLen > 64 * 1024 * 1024) {
-        c_debugPrint(funcTable, "[tcp] Response too large (%u bytes), discarding", (unsigned)respLen);
+    // Sanity check: cap at max_response_size from config to avoid allocation bombs
+    uint32_t max_response_size = 67108864;
+    PandragonRuntime& runtime = PandragonRuntime::getInstance();
+    max_response_size = runtime.getConfig().max_response_size;
+    if (respLen > max_response_size) {
+        c_debugPrint(funcTable, "[tcp] Response too large (%u bytes, max=%u), discarding",
+                     (unsigned)respLen, (unsigned)max_response_size);
         funcTable->closesocket(s);
         return { nullptr, 0 };
     }

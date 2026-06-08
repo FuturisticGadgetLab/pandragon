@@ -4,14 +4,14 @@
 Phase 1: Async BOF ↔ Sleep Mask Integration (Ekko)
 - New CHANNEL_SIGNAL enum: FORCE_SLEEP(3), WAKEUP_SEND(4), WAKEUP_EXIT(5)
 - BOF SDK macros (beacon_compatibility.h): MASK_FORCE_SLEEP(ch, sec), MASK_WAKEUP_SEND(ch), MASK_WAKEUP_EXIT(ch), MASK_STOP_TASK(ch), MASK_IS_SLEEPING(ch), MASK_PRINTF_IF_AWAKE(ch, ...)
-- Per-BOF channel passing: beacon prepends channel pointer to BOF args; BOF extracts via BeaconDataExtract() — no global state
+- Per-BOF channel passing: beacon prepends channel pointer to BOF args; BOF extracts via BeaconDataExtract() - no global state
 - Beacon main loop: checkAsyncBofForceSleep() overrides sleep; checkAsyncBofWakeupSignals() flushes output/cleans up
 - Async BOF concurrency note: infrastructure supports multi-async, but single async in practice (Ekko mask is per-process)
 
 Phase 3: Server-side Donut Integration
-- server/commands/donut.py — DonutExecutor, encode_shellcode/decode_shellcode (base32)
-- server/commands/execute_pe.py — handle_execute_pe() / handle_execute_assembly()
-- BofDev/shellcode_loader.c — 500-byte universal PE runner (RWX alloc + execute)
+- server/commands/donut.py - DonutExecutor, encode_shellcode/decode_shellcode (base32)
+- server/commands/execute_pe.py - handle_execute_pe() / handle_execute_assembly()
+- BofDev/shellcode_loader.c - 500-byte universal PE runner (RWX alloc + execute)
 - WebSocket handlers in operator_ws.py: execute_pe (native PE/DLL) + execute_assembly (.NET)
 
 Documentation
@@ -93,7 +93,7 @@ GUI:
   - 4 QSS themes: neon (dark+cyan), matrix (green-on-black),
     blood (dark crimson), nerv (Evangelion NERV console)
   - All inline setStyleSheet() calls removed from beacon_detail.py,
-    beacon_table.py, task_queue_widget.py — delegated to QSS via
+    beacon_table.py, task_queue_widget.py - delegated to QSS via
     setObjectName()
   - QWidget#beaconDetailContainer, QWidget#configTab transparent
     backgrounds for proper theme pane colour beneath scroll content

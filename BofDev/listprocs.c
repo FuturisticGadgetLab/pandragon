@@ -242,7 +242,7 @@ void go(char *args, int alen) {
     }
 
     /*
-     * Buffer sizing: worst case ~500 processes × ~80 chars/line = 40KB.
+     * Buffer sizing: worst case ~500 processes * ~80 chars/line = 40KB.
      * We flush in 64-line batches (~5KB) to stay well within beacon limits.
      * For systems with 300+ processes, this means ~5 flush cycles.
      */

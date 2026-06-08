@@ -35,14 +35,16 @@ typedef struct bof_prepared_channel {
 } bof_prepared_channel;
 
 /* BOF Channel Signal Types */
-#ifndef __cplusplus
-#define CHANNEL_SIGNAL_NONE          0
-#define CHANNEL_SIGNAL_ARGS_UPDATE  1
-#define CHANNEL_SIGNAL_ABORT        2
-#define CHANNEL_SIGNAL_FORCE_SLEEP   3
-#define CHANNEL_SIGNAL_WAKEUP_SEND  4
-#define CHANNEL_SIGNAL_WAKEUP_EXIT  5
-#endif
+typedef enum CHANNEL_SIGNAL {
+    CHANNEL_SIGNAL_NONE          = 0,
+    CHANNEL_SIGNAL_ARGS_UPDATE  = 1,
+    CHANNEL_SIGNAL_ABORT        = 2,
+
+    /* Async BOF <-> Sleep Mask Integration Signals */
+    CHANNEL_SIGNAL_FORCE_SLEEP   = 3,  /* BOF requests beacon to enter sleep mask (with duration in async_state->requested_sleep_sec) */
+    CHANNEL_SIGNAL_WAKEUP_SEND  = 4,  /* BOF requests beacon to wake, flush output, re-enter mask */
+    CHANNEL_SIGNAL_WAKEUP_EXIT  = 5,  /* BOF done - beacon wakes, restores main loop, clears signal */
+} CHANNEL_SIGNAL;
 
 /* BOF Channel structure (full definition for C BOF access) */
 typedef struct bof_channel {

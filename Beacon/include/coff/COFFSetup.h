@@ -5,6 +5,7 @@
 #include <utility>
 #include "COFFLoader.h"
 #include "coff_loader.h"
+#include "beacon_compatibility.h"
 
 typedef enum BOF_CLASS {
     BOF_CLASS_BLOCKING      = 0,
@@ -13,42 +14,6 @@ typedef enum BOF_CLASS {
 } BOF_CLASS;
 
 #define BOF_CHANNEL_DATA_SIZE  (64 * 1024)
-
-typedef enum CHANNEL_TYPE {
-    CHANNEL_TYPE_NONE         = 0,
-    CHANNEL_TYPE_NAMED_PIPE = 1,
-    CHANNEL_TYPE_SHMEM      = 2,
-} CHANNEL_TYPE;
-
-typedef enum CHANNEL_SIGNAL {
-    CHANNEL_SIGNAL_NONE          = 0,
-    CHANNEL_SIGNAL_ARGS_UPDATE  = 1,
-    CHANNEL_SIGNAL_ABORT        = 2,
-
-    /* Async BOF <-> Sleep Mask Integration Signals */
-    CHANNEL_SIGNAL_FORCE_SLEEP   = 3,  /* BOF requests beacon to enter sleep mask (with duration in async_state->requested_sleep_sec) */
-    CHANNEL_SIGNAL_WAKEUP_SEND  = 4,  /* BOF requests beacon to wake, flush output, re-enter mask */
-    CHANNEL_SIGNAL_WAKEUP_EXIT  = 5,  /* BOF done — beacon wakes, restores main loop, clears signal */
-} CHANNEL_SIGNAL;
-
-typedef struct bof_prepared_channel {
-    CHANNEL_TYPE type;
-    uint32_t     buffer_size;
-    wchar_t      pipe_name[260];
-    void*        shmem_ptr;
-} bof_prepared_channel;
-
-typedef struct bof_channel {
-    volatile LONG  bof_writing;
-    volatile LONG  beacon_writing;
-    volatile LONG  data_valid;
-    volatile LONG  data_acked;
-    volatile LONG  signal;
-    volatile LONG  signal_ack;
-    uint32_t      record_type;
-    uint32_t      record_length;
-    uint8_t       data[];
-} bof_channel;
 
 typedef struct async_bof_thread_ctx {
     void (*bof_entry)(char*, unsigned long);

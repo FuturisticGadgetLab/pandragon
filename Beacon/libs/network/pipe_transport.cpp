@@ -15,6 +15,7 @@
 #include "pipe_transport.h"
 #include "../../include/utils.h"
 #include "../bastia/bastia.h"
+#include "../../include/pandragon_runtime.h"
 
 /* Static buffer for recv: avoids malloc per frame */
 static uint8_t g_pipeRecvBuf[MAX_PIPE_BUFFER];
@@ -136,9 +137,12 @@ std::pair<void*, size_t> pipeRecvFrame(functionTable* funcTable, HANDLE hPipe) {
 
     if (frameLen == 0) return { nullptr, 0 };
 
-    /* Sanity cap: 64MB */
-    if (frameLen > 64 * 1024 * 1024) {
-        c_debugPrint(funcTable, "[pipe] Frame too large: %u bytes", (unsigned)frameLen);
+    /* Sanity cap: max_response_size from config */
+    uint32_t max_response_size = 67108864;
+    PandragonRuntime& runtime = PandragonRuntime::getInstance();
+    max_response_size = runtime.getConfig().max_response_size;
+    if (frameLen > max_response_size) {
+        c_debugPrint(funcTable, "[pipe] Frame too large: %u bytes (max=%u)", (unsigned)frameLen, (unsigned)max_response_size);
         return { nullptr, 0 };
     }
 

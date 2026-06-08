@@ -46,108 +46,73 @@ class BeaconGraphWidget(QWidget):
         self._notifications = overlay
 
     def _init_ui(self):
-        """Initialize UI components."""
+        """Initialize the UI components."""
         layout = QVBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
 
         # Title
-        title = QLabel("Beacon Topology Graph")
-        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        title = QLabel("Beacon Topology")
+        title.setFont(QFont("Consolas", 13, QFont.Weight.Bold))
         layout.addWidget(title)
 
-        # Control buttons
+        # Control buttons - brutalist minimal
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(6)
+
         self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.setFixedWidth(90)
         self.refresh_btn.clicked.connect(self.refresh)
         btn_layout.addWidget(self.refresh_btn)
 
-        self.add_node_btn = QPushButton("Add Node")
-        self.add_node_btn.clicked.connect(self.add_node)
-        btn_layout.addWidget(self.add_node_btn)
-
-        self.add_edge_btn = QPushButton("Add Link")
-        self.add_edge_btn.clicked.connect(self.add_edge)
-        btn_layout.addWidget(self.add_edge_btn)
-
-        self.remove_btn = QPushButton("Remove")
-        self.remove_btn.clicked.connect(self.remove_selected)
-        btn_layout.addWidget(self.remove_btn)
-
-        self.clear_btn = QPushButton("Clear All")
-        self.clear_btn.clicked.connect(self.clear_all)
-        btn_layout.addWidget(self.clear_btn)
-
-        self.save_btn = QPushButton("Save Layout")
-        self.save_btn.clicked.connect(self.save_layout)
-        btn_layout.addWidget(self.save_btn)
-
-        # Zoom controls
-        btn_layout.addSpacing(20)
-        self.zoom_in_btn = QPushButton("Zoom +")
-        self.zoom_in_btn.clicked.connect(self._zoom_in)
-        btn_layout.addWidget(self.zoom_in_btn)
-
-        self.zoom_out_btn = QPushButton("Zoom -")
-        self.zoom_out_btn.clicked.connect(self._zoom_out)
-        btn_layout.addWidget(self.zoom_out_btn)
-
-        self.fit_btn = QPushButton("Fit")
-        self.fit_btn.clicked.connect(self._fit_view)
-        btn_layout.addWidget(self.fit_btn)
-
-        # Layout algorithm
-        self.layout_btn = QPushButton("Auto Layout")
+        self.layout_btn = QPushButton("Layout")
+        self.layout_btn.setFixedWidth(90)
         self.layout_btn.clicked.connect(self._auto_layout)
         btn_layout.addWidget(self.layout_btn)
 
-        # Export button
-        self.export_btn = QPushButton("Export PNG")
+        self.fit_btn = QPushButton("Fit")
+        self.fit_btn.setFixedWidth(70)
+        self.fit_btn.clicked.connect(self._fit_view)
+        btn_layout.addWidget(self.fit_btn)
+
+        self.export_btn = QPushButton("Export")
+        self.export_btn.setFixedWidth(80)
         self.export_btn.clicked.connect(self._export_image)
         btn_layout.addWidget(self.export_btn)
-
-        # Search/filter
-        from PyQt6.QtWidgets import QLineEdit
-        self.search_box = QLineEdit()
-        self.search_box.setPlaceholderText("Filter by beacon ID...")
-        self.search_box.setMaximumWidth(200)
-        self.search_box.textChanged.connect(self._filter_nodes)
-        btn_layout.addWidget(self.search_box)
 
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
-        # Graph view
-        container = QGroupBox("Topology Visualization")
-        container_layout = QVBoxLayout()
-
+        # Graph view - clean brutalist container
         self.scene = QGraphicsScene(self)
         self.scene.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.NoIndex)
         self.view = BeaconGraphicsView(self.scene, self)
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self.view.setBackgroundBrush(QBrush(QColor(240, 240, 240)))
-        container_layout.addWidget(self.view)
-        container.setLayout(container_layout)
-        layout.addWidget(container)
+        self.view.setBackgroundBrush(QBrush(QColor(18, 18, 18)))
+        self.view.setFrameStyle(QFrame.Shape.NoFrame)
+        layout.addWidget(self.view)
 
-        # Info panel
-        info_group = QGroupBox("Node Information")
+        # Info panel - monospace, compact
+        info_group = QGroupBox("Node")
+        info_group.setFont(QFont("Consolas", 8))
         self.info_layout = QGridLayout()
-        self.info_beacon_id = QLabel("-")
-        self.info_type = QLabel("-")
-        self.info_ip = QLabel("-")
-        self.info_os = QLabel("-")
-        self.info_status = QLabel("-")
+        self.info_layout.setContentsMargins(6, 6, 6, 6)
+        self.info_layout.setSpacing(4)
 
-        self.info_layout.addWidget(QLabel("Beacon ID:"), 0, 0)
-        self.info_layout.addWidget(self.info_beacon_id, 0, 1)
-        self.info_layout.addWidget(QLabel("Type:"), 1, 0)
-        self.info_layout.addWidget(self.info_type, 1, 1)
-        self.info_layout.addWidget(QLabel("IP Address:"), 2, 0)
-        self.info_layout.addWidget(self.info_ip, 2, 1)
-        self.info_layout.addWidget(QLabel("OS:"), 3, 0)
-        self.info_layout.addWidget(self.info_os, 3, 1)
-        self.info_layout.addWidget(QLabel("Status:"), 4, 0)
-        self.info_layout.addWidget(self.info_status, 4, 1)
+        self.info_beacon_id = QLabel("-")
+        self.info_beacon_id.setFont(QFont("Consolas", 9))
+        self.info_type = QLabel("-")
+        self.info_type.setFont(QFont("Consolas", 9))
+        self.info_ip = QLabel("-")
+        self.info_ip.setFont(QFont("Consolas", 9))
+        self.info_status = QLabel("-")
+        self.info_status.setFont(QFont("Consolas", 9))
+
+        for lbl, val in [("ID", self.info_beacon_id), ("Type", self.info_type),
+                         ("IP", self.info_ip), ("Status", self.info_status)]:
+            k = QLabel(lbl)
+            k.setFont(QFont("Consolas", 8))
+            self.info_layout.addWidget(k, self.info_layout.rowCount(), 0)
+            self.info_layout.addWidget(val, self.info_layout.rowCount() - 1, 1)
 
         info_group.setLayout(self.info_layout)
         layout.addWidget(info_group)
@@ -407,9 +372,82 @@ class BeaconGraphWidget(QWidget):
         self.info_type.setText(node_data.get('transport', 'unknown'))
         metadata = node_data.get('metadata', {}) or {}
         self.info_ip.setText(metadata.get('ip', node_data.get('internal_ips', '-') if isinstance(node_data.get('internal_ips'), str) else '-'))
-        self.info_os.setText(metadata.get('os', '-'))
         status = "Alive" if node_data.get('is_alive', True) else "Offline"
         self.info_status.setText(status)
+
+
+class EnableRelayDialog(QDialog):
+    """Dialog for enabling relay on a beacon."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Enable P2P Relay")
+        self.setMinimumWidth(350)
+
+        layout = QFormLayout()
+        layout.setSpacing(8)
+
+        self.pipe_prefix_edit = QLineEdit("msagent")
+        self.pipe_prefix_edit.setPlaceholderText("msagent")
+        layout.addRow("Pipe Prefix:", self.pipe_prefix_edit)
+
+        info = QLabel("Pipe will be: {prefix}_{random_hex}")
+        info.setFont(QFont("Consolas", 8))
+        info.setStyleSheet("color: #888;")
+        layout.addRow(info)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+        self.setLayout(layout)
+
+    def get_pipe_prefix(self) -> str:
+        return self.pipe_prefix_edit.text().strip() or "msagent"
+
+
+class AddChildDialog(QDialog):
+    """Dialog for adding a child beacon to relay."""
+
+    def __init__(self, node_ids, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Add Child to Relay")
+        self.setMinimumWidth(350)
+
+        layout = QFormLayout()
+        layout.setSpacing(8)
+
+        self.child_combo = QComboBox()
+        self.child_combo.addItems(["- select -"] + node_ids)
+        layout.addRow("Child Beacon:", self.child_combo)
+
+        self.pipe_name_edit = QLineEdit()
+        self.pipe_name_edit.setPlaceholderText("auto")
+        layout.addRow("Pipe Name:", self.pipe_name_edit)
+
+        info = QLabel("Child connects to this node via named pipe")
+        info.setFont(QFont("Consolas", 8))
+        info.setStyleSheet("color: #888;")
+        layout.addRow(info)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+        self.setLayout(layout)
+
+    def get_child_id(self) -> str:
+        text = self.child_combo.currentText()
+        return "" if text == "- select -" else text
+
+    def get_pipe_name(self) -> str:
+        return self.pipe_name_edit.text().strip()
 
 
 class BeaconGraphicsView(QGraphicsView):
@@ -525,9 +563,94 @@ class NodeGraphicsItem(QGraphicsObject):
 
     def contextMenuEvent(self, a0):
         menu = QMenu()
-        edit_action = menu.addAction("Edit Node")
+        menu.setFont(QFont("Consolas", 9))
+
+        edit_action = menu.addAction("Edit")
         edit_action.triggered.connect(lambda: self.edit_node())
+
+        menu.addSeparator()
+
+        # Relay management actions
+        transport = self.node_data.get('transport', 'direct')
+        is_alive = self.node_data.get('is_alive', True)
+
+        enable_action = menu.addAction("Enable Relay")
+        enable_action.setEnabled(transport == 'direct' and is_alive)
+        enable_action.triggered.connect(lambda: self.enable_relay())
+
+        disable_action = menu.addAction("Disable Relay")
+        disable_action.setEnabled(transport == 'relay')
+        disable_action.triggered.connect(lambda: self.disable_relay())
+
+        add_child_action = menu.addAction("Add Child")
+        add_child_action.setEnabled(transport == 'relay')
+        add_child_action.triggered.connect(lambda: self.add_child())
+
+        remove_child_action = menu.addAction("Remove from Parent")
+        remove_child_action.setEnabled(transport == 'relay')
+        remove_child_action.triggered.connect(lambda: self.remove_child())
+
         menu.exec(self.parent_widget.view.viewport().mapToGlobal(a0.pos().toPoint()))
+
+    def enable_relay(self):
+        dialog = EnableRelayDialog(self.parent_widget)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            pipe_prefix = dialog.get_pipe_prefix()
+            try:
+                self.parent_widget.api.relay_enable(self.node_id, pipe_prefix)
+                # Refresh from server to reflect actual state
+                self.parent_widget.refresh()
+            except Exception as e:
+                QMessageBox.critical(self.parent_widget, "Error", f"Failed to enable relay: {e}")
+
+    def disable_relay(self):
+        reply = QMessageBox.question(
+            self.parent_widget, "Disable Relay",
+            f"Disable relay on beacon {self.node_id[:8]}?\nThis will drain all children.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.parent_widget.api.relay_disable(self.node_id)
+                self.parent_widget.refresh()
+            except Exception as e:
+                QMessageBox.critical(self.parent_widget, "Error", f"Failed to disable relay: {e}")
+
+    def add_child(self):
+        dialog = AddChildDialog(list(self.parent_widget.nodes.keys()), self.parent_widget)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            child_id = dialog.get_child_id()
+            pipe_name = dialog.get_pipe_name()
+            if not child_id:
+                QMessageBox.warning(self.parent_widget, "Invalid", "Child ID required")
+                return
+            try:
+                self.parent_widget.api.relay_add_child(self.node_id, child_id, pipe_name)
+                self.parent_widget.refresh()
+            except Exception as e:
+                QMessageBox.critical(self.parent_widget, "Error", f"Failed to add child: {e}")
+
+    def remove_child(self):
+        # Find parent via edge data
+        parent_id = None
+        for e in self.parent_widget.edges:
+            if e.get('to') == self.node_id:
+                parent_id = e.get('from')
+                break
+        if not parent_id:
+            QMessageBox.warning(self.parent_widget, "No Parent", "No parent beacon found")
+            return
+        reply = QMessageBox.question(
+            self.parent_widget, "Remove Child",
+            f"Remove this beacon from parent {parent_id[:8]}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                self.parent_widget.api.relay_remove_child(parent_id, self.node_id)
+                self.parent_widget.refresh()
+            except Exception as e:
+                QMessageBox.critical(self.parent_widget, "Error", f"Failed to remove child: {e}")
 
     def edit_node(self):
         """Edit node properties."""

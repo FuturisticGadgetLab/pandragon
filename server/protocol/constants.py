@@ -35,8 +35,6 @@ class S2BOpcode:
     ETW_ENABLE          = 0x25
     ETW_DISABLE         = 0x26
     INJECT_PROCESS      = 0x30
-    MIGRATE             = 0x31
-    HOLLOW_PROCESS      = 0x32
     # Relay opcodes (P2P SMB beacon)
     START_RELAY         = 0x40
     STOP_RELAY          = 0x41
@@ -84,8 +82,6 @@ S2B_OPCODE_NAMES = {
     S2BOpcode.ETW_ENABLE: "ETW_ENABLE",
     S2BOpcode.ETW_DISABLE: "ETW_DISABLE",
     S2BOpcode.INJECT_PROCESS: "INJECT_PROCESS",
-    S2BOpcode.MIGRATE: "MIGRATE",
-    S2BOpcode.HOLLOW_PROCESS: "HOLLOW_PROCESS",
     S2BOpcode.START_RELAY: "START_RELAY",
     S2BOpcode.STOP_RELAY: "STOP_RELAY",
     S2BOpcode.RELAY_ADD_CHILD: "RELAY_ADD_CHILD",

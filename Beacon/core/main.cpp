@@ -620,10 +620,12 @@ static void mainBeaconLoop(PandragonRuntime& runtime) {
                     bof_channel* ch = cur->channel;
 
                     /* Acquire beacon_writing oplock */
-                    while (_InterlockedCompareExchange(&ch->beacon_writing, 1, 0) != 0) { }
+                    enterLock(&ch->beacon_writing);
 
                     /* Wait for BOF to finish writing */
-                    while (ch->bof_writing) { }
+                    while (ch->bof_writing) {
+                        _mm_pause();
+                    }
 
                     if (ch->data_valid && !ch->data_acked) {
                         if (ch->record_length > 0) {

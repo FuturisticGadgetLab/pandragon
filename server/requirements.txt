@@ -5,3 +5,6 @@ aiohttp>=3.8.0
 pytest
 pytest-asyncio
 aiofiles>=24.1.0
+setuptools>=65.0.0
+PyQt6>=6.4.0
+websocket-client>=1.6.0

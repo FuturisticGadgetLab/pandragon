@@ -131,7 +131,7 @@ public:
 
     enum class SleepState : uint8_t {
         AWAKE = 0,
-        SLEEPING = 1      // Ekko/Foliage active — .text encrypted, don't call beacon functions
+        SLEEPING = 1      // Ekko/Foliage active - .text encrypted, don't call beacon functions
     };
 
     [[nodiscard]] SleepState getSleepState() const { return m_sleepState.load(std::memory_order_acquire); }

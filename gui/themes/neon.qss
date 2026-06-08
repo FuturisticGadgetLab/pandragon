@@ -1,4 +1,4 @@
-/* Pandragon Operator Console — Neon Theme */
+/* Pandragon Operator Console - Neon Theme */
 
 QMainWindow, QWidget#centralWidget {
     background-color: #1a1a2e;

@@ -1,6 +1,7 @@
 .vscode/
 build/
 __pycache__/
+gui/.state.json
 .pytest_cache/
 dist/
 *.spec

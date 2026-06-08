@@ -18,12 +18,11 @@ Padding is handled via PKCS#7 applied to plaintext before encryption.
 # cython: wraparound=False
 # cython: cdivision=True
 
-import struct
 import re
 from libc.string cimport memcpy
 from libc.stdint cimport uint32_t, uint8_t
 from dataclasses import dataclass
-from typing import Optional, Tuple, Dict, List, Any
+from typing import Optional, Tuple, Dict, List, Any, Union
 
 # C-level struct for the 46-byte header
 cdef extern from *:
@@ -99,9 +98,6 @@ _MACRO_INDEXES = {
 
 
 def _macro_to_regex(pattern: str) -> str:
-    """
-    Convert a macro-containing pattern to a regex for matching.
-    """
     macros: List[str] = []
 
     def save_macro(match: re.Match) -> str:
@@ -133,9 +129,6 @@ def _macro_to_regex(pattern: str) -> str:
 
 
 def unwrap_payload(raw_payload: str, prefix: str = "", suffix: str = "") -> str:
-    """
-    Strip wrapper prefix/suffix from raw payload.
-    """
     result = raw_payload
 
     if prefix:
@@ -181,8 +174,7 @@ def decrypt_payload(
     const unsigned char[:] nonce,
     const unsigned char[:] key,
     const unsigned char[:] associated_data = None
-):
-    """Decrypt payload using XChaCha20-Poly1305."""
+) -> Tuple[bool, bytes]:
     if ChaCha20_Poly1305 is None:
         return False, b""
 
@@ -206,15 +198,9 @@ def decrypt_payload(
 # Main Entry Points
 # =============================================================================
 
-def parse_header(data):
-    """Parse and validate packet header without decrypting payload.
-    
-    Args:
-        data: bytes or memoryview of packet data
-        
-    Returns:
-        (header_dict, error_msg) tuple
-    """
+def parse_header(
+    data: Union[bytes, memoryview]
+) -> Tuple[Optional[Dict[str, Any]], str]:
     cdef const unsigned char[:] view
     if isinstance(data, memoryview):
         view = data
@@ -247,17 +233,11 @@ def parse_header(data):
     return header, ""
 
 
-def parse_packet(data, key, direction_s2b=False):
-    """Parse and decrypt a complete packet with C-level efficiency.
-    
-    Args:
-        data: bytes or memoryview of packet data
-        key: bytes or memoryview of encryption key
-        direction_s2b: True if server->beacon, False if beacon->server
-        
-    Returns:
-        (ParsedPacket, error_msg) tuple
-    """
+def parse_packet(
+    data: Union[bytes, memoryview],
+    key: Union[bytes, memoryview],
+    direction_s2b: bool = False
+) -> Tuple[Optional[ParsedPacket], str]:
     cdef const unsigned char[:] data_view
     cdef const unsigned char[:] key_view
     
@@ -271,7 +251,6 @@ def parse_packet(data, key, direction_s2b=False):
     else:
         key_view = key
     
-    """Parse and decrypt a complete packet with C-level efficiency."""
     if data_view.shape[0] == 0:
         return None, "Empty data"
     if data_view.shape[0] < HEADER_LEN + MAC_LEN:
@@ -301,7 +280,6 @@ def parse_packet(data, key, direction_s2b=False):
             S2BOpcode.START_RELAY, S2BOpcode.STOP_RELAY,
             S2BOpcode.RELAY_ADD_CHILD, S2BOpcode.RELAY_REMOVE_CHILD,
             S2BOpcode.RELAY_DOWN, S2BOpcode.INJECT_PROCESS,
-            S2BOpcode.MIGRATE, S2BOpcode.HOLLOW_PROCESS,
         }
     else:
         valid_opcodes = {
@@ -353,8 +331,7 @@ def serialize_response(
     const unsigned char[:] key,
     bint pad = True,
     unsigned int pad_max = 0
-):
-    """Optimized response serialization."""
+) -> bytes:
     import os
     import random
 

