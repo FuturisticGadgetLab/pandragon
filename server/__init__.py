@@ -4,8 +4,8 @@ Pandragon Teamserver Package
 Modern C2 teamserver.
 """
 
-__version__ = "2.0.0"
-__author__ = "Pandragon Team"
+__version__ = "1.0.0"
+__author__ = "Serexp, Futuristic Gadgets Lab"
 
 from .core.config import (
     load_config, get_config, setup_logging, get_logger,
