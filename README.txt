@@ -55,7 +55,7 @@ Mama look, I finally reached a major version after 1.5 months of development!
 See the LICENSE file in the repository root for the full terms.
 
   In short: you may use, modify, and share this software for any
-noncommercial purpose — including personal research, education, public
+noncommercial purpose, including personal research, education, public
 security testing, and hobby projects. Commercial use requires a separate
 license from the authors.
 
@@ -63,17 +63,16 @@ license from the authors.
 ------------------------------------------------------------------------------
 
   This framework is intended exclusively for:
-  • Authorized penetration testing with written permission from the target
+  - Authorized penetration testing with written permission from the target
     system owner(s)
-  • Academic research and cybersecurity education in controlled environments
-  • Personal security research on systems you own or have explicit permission
+  - Academic research and cybersecurity education in controlled environments
+  - Personal security research on systems you own or have explicit permission
     to test
 
   Use of this tool against any system without prior written authorization
 is illegal and unethical. The authors disclaim all liability for misuse.
 
-  If you are a student or red-team operator with proper authorization, you're
-welcome here. If you intend to use this for any other purpose, stop now.
+  Do no evil.
 
 ================================================================================
                                 OVERVIEW
@@ -143,7 +142,7 @@ Server (Development — hot-reload, tests, debug):
   make clean-venv                 # Remove venv and parser artifacts
 
 Server commands:
-  cd server && ../server/venv/bin/python run.py create admin  - Create operator account
+  cd server && server/venv/bin/python run.py create admin      - Create operator account
   make run-server                                              - Start server (from project root)
   # Server must be started from server/ directory (or use --data-dir server/)
   # because config paths (SSL certs, known_beacons.json) are relative.
@@ -545,14 +544,13 @@ It was extremely fun to work on it, and it does a lot much better than other C2s
 but it can also be made much better. It should serve as a theorical base of what
 could be, and an encouragement to do better, because we really can do better.
 A lot of my friends helped me tremendously throughout this, namely Sako which
-has been here for many years [and many more to come]!!!, Amine (twt @01beigecamry)
-that I saw as a role model early on, Maria (twt @jelaime2002) that helped me
-figure a lot of stuff out (even if she probably doesn't realize it),
-Maddie (github @llmaddie) that also helped me a lot, Lavender, that taught me so
-much, jonaslyk, an extremely smart person, the whole of WhisperGate and the whole
-of the FGL! What a journey, what incredible men and women! This project was initially
-planned for release on my 18th birthday, but perfectionism has gotten the better of
-me, forcing me to release it... 1.5 months late!
+has been here for many years [and many more to come]!!!, Amine  that I saw as a
+role model early on, Maria that helped me figure a lot of stuff out (even if she
+probably doesn't realize it), Maddie (github @llmaddie) that also helped me a lot,
+Lavender, that taught me so much, jonaslyk, an extremely smart person, the whole of
+WhisperGate and the whole of the FGL! What a journey, what incredible men and women!
+This project was initially planned for release on my 18th birthday, but perfectionism
+has gotten the better of me, forcing me to release it... 1.5 months late!
 
 after all maybe you can actually meet really good people on discord and twitter! x)
 
@@ -572,9 +570,4 @@ after all maybe you can actually meet really good people on discord and twitter!
 For educational and authorized red team operations only.
 
 Unauthorized use against systems without explicit permission is strictly
-prohibited. This is a proprietary and private tool of the Futuristic
-Gadgets Laboratory. Do not release, share or disclose any parts of its source code.
-
-We understand that C2s are dual-use technology, and Pandragon was released to show
-authorized, legal actors how to do better, and to demonstrate technical prowesses
-achievable through clever engineering and a love for the game.
+prohibited.
