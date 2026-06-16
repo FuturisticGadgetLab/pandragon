@@ -1,3 +1,0 @@
-"""
-Pandragon Server Test Suite
-"""

@@ -1,0 +1,20 @@
+[project]
+name = "pandragon-config-builder"
+version = "0.1.0"
+description = "Pandragon Beacon Config Builder - CLI tools for building, validating, and managing beacon configurations"
+requires-python = ">=3.10"
+dependencies = [
+    "pycryptodome>=3.15.0",
+    "jsonschema>=4.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=64.0.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+pandragon-config-builder = "pandragon_config_builder.builder:main"
+pandragon-config-check = "pandragon_config_builder.checker:main"

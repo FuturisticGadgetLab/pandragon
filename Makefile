@@ -11,7 +11,7 @@ CONFIG_BUILDER = tools/config_builder.py
 APPEND_TOOL = tools/append_data.py
 CONFIG_FILE ?= Beacon/config/default.json
 CONFIG_OUTPUT_DIR = Beacon/config
-GENERATED_CONFIG = $(CONFIG_OUTPUT_DIR)/include/generated_config.h
+GENERATED_CONFIG = Beacon/include/generated_config.h
 
 # required for all builds. todo add as input?
 KEY_FILE = server/known_beacons.json
@@ -91,8 +91,9 @@ endif
 
 .PHONY: all clean clean-logs clean-all config rebuild keys sync-keys check-keys \
         server server-test server-clean run-server run-server-args run-gui gui-clean \
-        venv build-parser venv-build setup clean-venv help-setup \
-        append-data append-file append-hex append-chain append-config
+        venv build-parser venv-build setup clean-venv help-setup submodules \
+        append-data append-file append-hex append-chain append-config \
+        config-all config-check config-graph
 
 # Default target: check keys, generate config, then build
 all: check-keys config $(OUTPUT) append-config
@@ -135,6 +136,26 @@ config:
 # Force config regeneration (same as config since it always regenerates)
 .PHONY: force-config
 force-config: config
+
+# =============================================================================
+# Unified config targets (Options 2+3: Config Graph + Make UX)
+# =============================================================================
+
+# One-command config setup: keys + beacon config + SSL cert
+.PHONY: config-all
+config-all: check-keys config
+	$(MAKE) -C server ssl-cert
+	$(ECHO) "[+] All config artifacts ready"
+
+# Validate the entire config stack
+.PHONY: config-check
+config-check:
+	$(Q)$(PYTHON) tools/config_check.py --check-all
+
+# Print the config flow graph
+.PHONY: config-graph
+config-graph:
+	$(Q)$(PYTHON) tools/config_check.py --graph
 
 # =============================================================================
 # Post-build append targets (Cobalt Strike-style prepend/append)
@@ -207,26 +228,21 @@ $(OUTPUT_DIR)/%.o: %.cpp $(GENERATED_CONFIG)
 clean:
 	rm -rf $(OUTPUT_DIR)
 	rm -f $(GENERATED_CONFIG)
-	rm -f Beacon/config/*.bin Beacon/config/include/generated_config.h
+	rm -f Beacon/config/*.bin Beacon/config/include/generated_config.h Beacon/include/generated_config.h
 	# NOTE: Do NOT delete $(KEY_FILE) - keys are persistent credentials
 
 # Remove server logs, sessions, and runtime data (preserves keys & config)
 clean-logs:
-	rm -f server/pandragon*.log
-	rm -f server/sessions.json
-	rm -f server/operators.json
-	$(ECHO) "[+] Server logs & runtime data removed"
+	$(MAKE) -C server clean-logs
 
 # Clean everything: build artifacts, logs, generated files, Python cache
 clean-all: clean clean-logs
-	rm -rf build/server server/build server/dist
-	rm -f build/PandragonServer
+	$(MAKE) -C server clean
 	find . -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
 	find . -type d -name '.pytest_cache' -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name '*.pyc' -delete 2>/dev/null || true
-	rm -f include/generated_config.h
+	rm -f include/generated_config.h Beacon/include/generated_config.h
 	rm -f server/known_beacons.json
-	rm -f server/protocol/parser.c
 	$(ECHO) "[+] Full clean complete"
 
 rebuild: clean all
@@ -238,104 +254,91 @@ rebuild: clean all
 # Generate self-signed SSL cert if missing
 .PHONY: ssl-cert
 ssl-cert:
-	$(Q)mkdir -p server/ssl
-	$(Q)test -f server/ssl/cert.pem || ( \
-		echo "[*] Generating self-signed SSL cert (server/ssl/cert.pem)..." && \
-		openssl req -x509 -newkey rsa:4096 -keyout server/ssl/key.pem \
-			-out server/ssl/cert.pem -days 3650 -nodes \
-			-subj "/CN=Pandragon" 2>/dev/null && \
-		echo "[+] SSL cert generated" \
-	)
+	$(MAKE) -C server ssl-cert
+
+# Initialize submodules (no-op until Phase 4)
+.PHONY: submodules
+submodules:
+	@git submodule update --init --recursive 2>/dev/null || true
 
 # Setup development environment (venv, deps, parser, SSL certs)
 .PHONY: setup
-setup: venv-build ssl-cert
+setup:
+	@echo "[*] Setting up server environment..."
+	$(MAKE) -C server setup
+	@echo "[*] Setting up GUI environment..."
+	$(MAKE) -C gui setup
 	$(ECHO) "[+] Development environment ready!"
-	$(ECHO) "  Run server with: make run-server"
-	$(ECHO) "  Or activate venv: source server/venv/bin/activate && cd server && python3 run.py"
+	$(ECHO) "  Run server: make run-server"
+	$(ECHO) "  Run server with args: make run-server-args ARGS=\"...\""
+	$(ECHO) "  Run GUI: make run-gui"
+	$(ECHO) "  Activate server venv: source server/venv/bin/activate"
 
 # Create venv and install dependencies
 .PHONY: venv
 venv:
-	@test -d server/venv || (echo "[*] Creating server venv..." && python3 -m venv server/venv)
-	@echo "[*] Upgrading pip/setuptools/wheel..."
-	@server/venv/bin/pip install --upgrade pip setuptools wheel -q
-	@echo "[*] Installing server dependencies..."
-	@server/venv/bin/pip install -r server/requirements.txt
+	$(MAKE) -C server venv
 
 # Build the Cython parser (requires venv)
 .PHONY: build-parser
 build-parser: venv
-	@echo "[*] Building protocol parser..."
-	@cd server && ../server/venv/bin/python setup.py build_ext --inplace
-	@echo "[+] Parser .so ready"
+	$(MAKE) -C server build-parser
 
 # Combined: venv + parser build
 .PHONY: venv-build
-venv-build: venv build-parser
+venv-build:
+	$(MAKE) -C server venv-build
 
 # Run server with venv activated
 .PHONY: run-server
-run-server: venv-build
-	@echo "[*] Starting Pandragon Teamserver..."
-	@cd server && ../server/venv/bin/python run.py
+run-server:
+	$(MAKE) -C server run
 
 # Run server with args (e.g., make run-server-args ARGS="--debug")
 .PHONY: run-server-args
-run-server-args: venv-build
-	@cd server && ../server/venv/bin/python run.py $(ARGS)
+run-server-args:
+	$(MAKE) -C server run-args ARGS="$(ARGS)"
 
 # Run operator GUI (GUI deps merged into server/requirements.txt)
-.PHONY: run-gui gui-deps
-gui-deps:
-	@test -d server/venv || (echo "[!] Run 'make setup' first"; exit 1)
-	@echo "[*] Verifying GUI dependencies..."
-	@cd server && ../server/venv/bin/pip install -r ../server/requirements.txt
-
-run-gui: venv-build gui-deps
-	@echo "[*] Starting Pandragon GUI..."
-	@cd gui && ../server/venv/bin/python run_gui.py
+.PHONY: run-gui
+run-gui:
+	$(MAKE) -C gui run
 
 # Remove GUI runtime artifacts
 .PHONY: gui-clean
 gui-clean:
-	rm -f gui/*.log
-	find gui -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+	$(MAKE) -C gui clean
 
 # Clean server venv and build artifacts
 .PHONY: clean-venv
 clean-venv:
-	rm -rf server/venv
-	rm -f server/protocol/parser*.so server/protocol/parser.c
-	find server -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+	$(MAKE) -C server clean-venv
 
 # Print setup help
 .PHONY: help-setup
 help-setup:
-	@echo "Pandragon Server Setup Commands:"
-	@echo "  make setup          - Create venv, install deps, build parser (recommended first run)"
+	@echo "Pandragon Setup Commands:"
+	@echo "  make setup          - Full setup: server venv + GUI venv + parser + SSL cert"
 	@echo "  make run-server     - Build parser if needed, run teamserver"
 	@echo "  make run-server-args ARGS='...' - Run with custom args"
+	@echo "  make run-gui        - Launch operator GUI"
 	@echo "  make build-parser   - Build Cython parser only"
 	@echo "  make venv           - Create venv and install deps only"
 	@echo "  make clean-venv     - Remove venv and parser build artifacts"
+	@echo ""
+	@echo "Submodule targets (delegated):"
+	@echo "  make -C server <target>  - Server-specific (see server/Makefile)"
+	@echo "  make -C gui <target>     - GUI-specific (see gui/Makefile)"
 
-# Build standalone server binary (requires pre-built .so)
-server: build-parser
-	$(ECHO) "[*] Building standalone server binary..."
-	mkdir -p build
-	cd server && ../server/venv/bin/pyinstaller --clean --distpath ../build pandragon.spec
-	$(ECHO) "[+] Server binary: build/PandragonServer"
+# Build standalone server binary (delegated to server/Makefile)
+server:
+	$(MAKE) -C server build
 
-# Run server tests (builds parser first if .so is stale)
-server-test: build-parser
-	@cd server && ../server/venv/bin/python -m pytest tests/ -v
+# Run server tests (delegated to server/Makefile)
+server-test:
+	$(MAKE) -C server test
 
 # Remove PyInstaller build artifacts and parser build products
 .PHONY: server-clean
 server-clean:
-	rm -rf server/venv build/server server/build server/dist
-	rm -f build/PandragonServer
-	rm -f server/protocol/parser*.so server/protocol/parser.c
-	rm -f server/*.spec
-	find server -type d -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true
+	$(MAKE) -C server clean

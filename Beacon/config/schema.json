@@ -191,9 +191,9 @@
         },
         "sleep_obfuscation": {
             "type": "string",
-            "enum": ["none", "ekko", "foliage"],
+            "enum": ["none", "ekko", "ekko_runtime", "foliage"],
             "default": "none",
-            "description": "Sleep obfuscation method. 'ekko' = CreateTimerQueueTimer based, 'foliage' = future"
+            "description": "Sleep obfuscation method. 'ekko' = .obf section (static), 'ekko_runtime' = runtime RX allocation (dynamic), 'foliage' = future"
         },
         "sleep_wipe_pe_headers": {
             "type": "boolean",

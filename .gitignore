@@ -1,7 +1,6 @@
 .vscode/
 build/
 __pycache__/
-gui/.state.json
 .pytest_cache/
 dist/
 *.spec
@@ -11,14 +10,10 @@ dist/
 *.key
 *.crt
 *.pem
-server/venv/*
 *.pyc
 *.bin
-server/operators.json
 *.log
-server/sessions.json
 commit.txt
-gui/.state.json
 Beacon/include/generated_config.h
 todo.txt
-server/protocol/parser.c
+*.egg-info/

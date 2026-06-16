@@ -57,11 +57,14 @@ struct wipe_on_exit {
 };
 
 // ---------------------------------------------------------------------------
-// lcg LCG constants shared between compile-time ct_prng and runtime resolver.
-// Standard Numerical Recipes / glibc LCG parameters.
+// lcg LCG constants - PER-BUILD DERIVED FROM BUILD_TIME_RANDOM_SEED
+// Neutralizes static signature detection of Numerical Recipes/glibc constants.
+// Both compile-time (ct_prng) and runtime (_lcg_resolve_*) use same derivation.
 // ---------------------------------------------------------------------------
-constexpr uint64_t MCLG_LCG_MUL = 6364136223846793005ULL;
-constexpr uint64_t MCLG_LCG_ADD = 1442695040888963407ULL;
+constexpr uint64_t MCLG_LCG_MUL = 
+    (BUILD_TIME_RANDOM_SEED * 0x5851F42D4C957F2DULL) ^ 0x4C957F2D5851F42DULL;
+constexpr uint64_t MCLG_LCG_ADD = 
+    (BUILD_TIME_RANDOM_SEED * 0x14057B7EF767814FULL) ^ 0xF767814F14057B7EULL;
 
 // ---------------------------------------------------------------------------
 // ct_prng - compile-time LCG stream cipher

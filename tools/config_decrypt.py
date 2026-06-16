@@ -27,7 +27,6 @@ except ImportError:
     sys.exit(1)
 
 # Constants
-PCFG_MAGIC = 0x50434647  # "PCFG"
 PCFG_VERSION_XOR = 0x0001  # Legacy XOR obfuscation
 PCFG_VERSION_XCHACHA = 0x0002  # XChaCha20-Poly1305 encryption
 LEGACY_XOR_KEY = 0x5A  # Only for very old configs
@@ -45,7 +44,6 @@ def parse_cpp_header(filepath: str) -> tuple:
     blob_match = re.search(r'constexpr uint8_t CONFIG_BLOB\[\] = \{([^}]+)\}', content, re.DOTALL)
     if not blob_match:
         raise ValueError("Could not find CONFIG_BLOB in header")
-
     hex_str = blob_match.group(1)
     hex_values = re.findall(r'0x([0-9A-Fa-f]{2})', hex_str)
     blob = bytes(int(v, 16) for v in hex_values)
@@ -77,7 +75,7 @@ def decrypt_blob(blob: bytes, config_key: bytes = None, nonce: bytes = None) -> 
     """
     Decrypt config blob.
     Supports both XChaCha20-Poly1305 (v2) and legacy XOR (v1).
-    
+
     For v2: config_key and nonce must be provided
     For v1: uses legacy XOR key
     """
@@ -87,11 +85,11 @@ def decrypt_blob(blob: bytes, config_key: bytes = None, nonce: bytes = None) -> 
     # Parse header
     # v1: magic(4) + version(2) + reserved(2) + length(4) + crc32(4) = 16 bytes
     # v2: magic(4) + version(2) + reserved(2) + nonce(24) + ciphertext_len(4) = 36 bytes
-    
+
     magic, version = struct.unpack('<IH', blob[:6])
 
-    if magic != PCFG_MAGIC:
-        raise ValueError(f"Invalid magic: 0x{magic:08X} (expected 0x{PCFG_MAGIC:08X})")
+    # Magic is per-build randomized; just record it
+    # No validation against a constant since it's unique per build
 
     result = {
         'magic': magic,
@@ -148,92 +146,95 @@ def decrypt_blob(blob: bytes, config_key: bytes = None, nonce: bytes = None) -> 
 
         # Verify CRC
         import zlib
-        computed_crc = zlib.crc32(payload) & 0xFFFFFFFF
-        result['crc32'] = crc32_val
-        result['crc_computed'] = computed_crc
-        result['crc_valid'] = (computed_crc == crc32_val)
+        crc = zlib.crc32(payload) & 0xFFFFFFFF
+        if crc != crc32_val:
+            raise ValueError(f"CRC mismatch: expected 0x{crc32_val:08X}, got 0x{crc:08X}")
+
         result['payload'] = bytes(payload)
         result['encrypted'] = False
         result['encryption_method'] = 'XOR (legacy)'
 
     else:
-        raise ValueError(f"Unknown config version: 0x{version:04X}")
+        raise ValueError(f"Unknown config version: {version}")
 
     return result
 
 
-def _parse_malleable_block(payload: bytes, offset: int, payload_len: int):
+def _parse_malleable_block(payload: bytes, offset: int) -> tuple:
     """Parse a malleable config block from payload at given offset.
-    Returns (malleable_dict, bytes_consumed) or None on failure.
+    Returns (malleable_dict, bytes_consumed)
     """
+    if offset + 6 > len(payload):
+        raise ValueError("Payload too small for malleable header")
+
     start = offset
-    if offset + 4 > payload_len:
-        return None
 
     # Wrapper prefix (uint16_t LE)
     prefix_len = payload[offset] | (payload[offset + 1] << 8)
     offset += 2
-    prefix = payload[offset:offset+prefix_len].decode('utf-8', errors='replace') if prefix_len else ''
+    wrapper_prefix = payload[offset:offset + prefix_len].decode('utf-8') if prefix_len > 0 else ""
     offset += prefix_len
 
     # Wrapper suffix (uint16_t LE)
-    if offset + 2 > payload_len:
-        return None
     suffix_len = payload[offset] | (payload[offset + 1] << 8)
     offset += 2
-    suffix = payload[offset:offset+suffix_len].decode('utf-8', errors='replace') if suffix_len else ''
+    wrapper_suffix = payload[offset:offset + suffix_len].decode('utf-8') if suffix_len > 0 else ""
     offset += suffix_len
 
-    # HTTP headers
-    if offset >= payload_len:
-        return None
-    header_count = payload[offset]
+    # HTTP headers (count)
+    num_headers = payload[offset]
     offset += 1
-
     headers = []
-    for _ in range(header_count):
-        if offset + 2 > payload_len:
-            break
+    for _ in range(num_headers):
+        if offset + 2 > len(payload):
+            raise ValueError("Payload too small for header count")
         name_len = payload[offset]
-        offset += 1
-        value_len = payload[offset]
-        offset += 1
-        name = payload[offset:offset+name_len].decode('utf-8', errors='replace')
+        value_len = payload[offset + 1]
+        offset += 2
+
+        if offset + name_len + value_len > len(payload):
+            raise ValueError("Payload too small for header data")
+        header_name = payload[offset:offset + name_len].decode('utf-8')
         offset += name_len
-        value = payload[offset:offset+value_len].decode('utf-8', errors='replace')
+        header_value = payload[offset:offset + value_len].decode('utf-8')
         offset += value_len
-        headers.append({'name': name, 'value': value})
+        headers.append({'name': header_name, 'value': header_value})
 
     # Payload location
-    if offset >= payload_len:
-        return None
+    if offset >= len(payload):
+        raise ValueError("Payload too small for payload location")
     loc_type = payload[offset]
     offset += 1
-    loc_types = ['query_param', 'path', 'body']
-    loc_type_str = loc_types[loc_type] if loc_type < 3 else 'unknown'
 
-    param_name_len = payload[offset] if offset < payload_len else 0
-    offset += 1
-    param_name = payload[offset:offset+param_name_len].decode('utf-8', errors='replace') if param_name_len else ''
-    offset += param_name_len
+    loc_type_str = {0: 'query_param', 1: 'path', 2: 'body'}.get(loc_type, 'unknown')
 
-    path_prefix_len = payload[offset] if offset < payload_len else 0
+    # Param name
+    pn_len = payload[offset]
     offset += 1
-    path_prefix = payload[offset:offset+path_prefix_len].decode('utf-8', errors='replace') if path_prefix_len else ''
-    offset += path_prefix_len
+    param_name = payload[offset:offset + pn_len].decode('utf-8') if pn_len > 0 else ""
+    offset += pn_len
 
-    path_suffix_len = payload[offset] if offset < payload_len else 0
+    # Path prefix
+    pp_len = payload[offset]
     offset += 1
-    path_suffix = payload[offset:offset+path_suffix_len].decode('utf-8', errors='replace') if path_suffix_len else ''
-    offset += path_suffix_len
+    path_prefix = payload[offset:offset + pp_len].decode('utf-8') if pp_len > 0 else ""
+    offset += pp_len
 
-    body_ct = payload[offset] if offset < payload_len else 0
+    # Path suffix
+    ps_len = payload[offset]
     offset += 1
-    body_cts = ['text/plain', 'application/octet-stream']
-    body_ct_str = body_cts[body_ct] if body_ct < 2 else 'unknown'
+    path_suffix = payload[offset:offset + ps_len].decode('utf-8') if ps_len > 0 else ""
+    offset += ps_len
+
+    # Body content type
+    if offset >= len(payload):
+        raise ValueError("Payload too small for body content type")
+    body_ct = payload[offset]
+    offset += 1
+    body_ct_str = {0: 'text/plain', 1: 'application/octet-stream'}.get(body_ct, 'text/plain')
 
     malleable = {
-        'wrapper': {'prefix': prefix, 'suffix': suffix},
+        'wrapper': {'prefix': wrapper_prefix, 'suffix': wrapper_suffix},
         'http_headers': headers,
         'payload_location': {
             'type': loc_type_str,
@@ -250,263 +251,163 @@ def parse_payload(payload: bytes) -> dict:
     """Parse decrypted v2 config payload"""
     if len(payload) < 45:
         raise ValueError("Payload too small")
-    
+
     offset = 0
-    
+
     # === Beacon ID (8 bytes) ===
     beacon_id = payload[offset:offset+8].hex()
     offset += 8
-    
+
     # === Crypto key (32 bytes) ===
     crypto_key = payload[offset:offset+32].hex()
     offset += 32
-    
+
     # === Channel count (1 byte) ===
     channel_count = payload[offset]
     offset += 1
-    
+
     # === Parse C2 channels ===
     channels = []
     for ch_idx in range(channel_count):
         if offset + 14 > len(payload):
-            break
+            raise ValueError("Payload too small for channel header")
 
+        # Channel header: type(1) + http_method(1) + host_len(1) + path_len(1) + ua_len(1) + reserved(1) + port(2) + max_failures(1) + backoff_ms(4)
         ch_type = payload[offset]
         http_method = payload[offset + 1]
         host_len = payload[offset + 2]
         path_len = payload[offset + 3]
         ua_len = payload[offset + 4]
-        # reserved = payload[offset + 5]
+        # reserved = offset + 5
         port = payload[offset + 6] | (payload[offset + 7] << 8)
         max_failures = payload[offset + 8]
-        backoff_ms = (payload[offset + 9] | (payload[offset + 10] << 8) |
-                      (payload[offset + 11] << 16) | (payload[offset + 12] << 24))
+        backoff_ms = payload[offset + 9] | (payload[offset + 10] << 8) | (payload[offset + 11] << 16) | (payload[offset + 12] << 24)
         offset += 13
 
         # Read strings
-        host = payload[offset:offset+host_len].decode('utf-8', errors='replace')
+        if offset + host_len + path_len + ua_len > len(payload):
+            raise ValueError("Payload too small for channel strings")
+
+        host = payload[offset:offset + host_len].decode('utf-8')
         offset += host_len
-
-        path = payload[offset:offset+path_len].decode('utf-8', errors='replace')
+        path = payload[offset:offset + path_len].decode('utf-8')
         offset += path_len
-
-        ua = payload[offset:offset+ua_len].decode('utf-8', errors='replace')
+        user_agent = payload[offset:offset + ua_len].decode('utf-8')
         offset += ua_len
 
-        # Read malleable_mode byte
-        if offset >= len(payload):
-            break
+        # Malleable mode
         malleable_mode = payload[offset]
         offset += 1
 
-        type_str = "HTTP" if ch_type == 1 else "HTTPS" if ch_type == 2 else "TCP" if ch_type == 3 else "PIPE" if ch_type == 4 else "UNKNOWN"
-        mode_str = "GLOBAL" if malleable_mode == 0x00 else "INLINE" if malleable_mode == 0x01 else "NONE"
-        method_str = "POST" if http_method == 1 else "GET"
-
-        channel_info = {
-            'type': type_str,
+        channel = {
+            'type': {1: 'HTTP', 2: 'HTTPS', 3: 'TCP', 4: 'PIPE'}.get(ch_type, 'UNKNOWN'),
+            'http_method': 'POST' if http_method else 'GET',
             'host': host,
             'port': port,
             'path': path,
-            'user_agent': ua,
-            'http_method': method_str,
+            'user_agent': user_agent,
             'max_consecutive_failures': max_failures,
             'backoff_sleep_ms': backoff_ms,
-            'malleable_mode': f"0x{malleable_mode:02x} ({mode_str})"
+            'malleable_mode': {0: 'global', 1: 'inline', 255: 'none'}.get(malleable_mode, 'unknown'),
         }
 
-        # Parse inline malleable if present
-        if malleable_mode == 0x01:
-            ch_malleable = _parse_malleable_block(payload, offset, len(payload))
-            if ch_malleable:
-                channel_info['malleable_config'] = ch_malleable[0]
-                offset += ch_malleable[1]
+        if malleable_mode == 1 and offset + 2 <= len(payload):
+            malleable, consumed = _parse_malleable_block(payload, offset)
+            channel['malleable_config'] = malleable
+            offset += consumed
 
-        channels.append(channel_info)
+        channels.append(channel)
 
-    # === Sleep ms (4 bytes) ===
-    sleep_ms = payload[offset] | (payload[offset + 1] << 8) | \
-               (payload[offset + 2] << 16) | (payload[offset + 3] << 24)
-    offset += 4
-
-    # === Jitter pct (1 byte) ===
-    jitter_pct = payload[offset]
+    # --- Global malleable config ---
+    if offset >= len(payload):
+        raise ValueError("Payload too small for global malleable flag")
+    has_global_malleable = payload[offset]
     offset += 1
 
-    # === Kill date (4 bytes) ===
-    kill_date = payload[offset] | (payload[offset + 1] << 8) | \
-                (payload[offset + 2] << 16) | (payload[offset + 3] << 24)
-    offset += 4
-
-    # === Options (2 bytes) ===
-    options_val = payload[offset] | (payload[offset + 1] << 8)
-    offset += 2
-
-    options = {
-        'sandbox_evasion': bool(options_val & 0x0001),
-        'debug_mode': bool(options_val & 0x0002),
-        'kill_date_set': bool(options_val & 0x0004),
-        'validate_ssl': bool(options_val & 0x0008),
-        'bypass_etw': bool(options_val & 0x0010),
-        'use_indirect_syscalls': bool(options_val & 0x0020),
-        'lazy_checkin': bool(options_val & 0x0040),
-        'lazy_unhook': bool(options_val & 0x0080),
-        'sleep_obfuscation': ['none', 'ekko', 'foliage', 'reserved'][(options_val >> 8) & 3],
-        'sleep_wipe_pe_headers': bool(options_val & 0x0400),
-        'sleep_stack_spoof': bool(options_val & 0x0800),
-        'pad': bool(options_val & 0x1000),
-        'indirect_pivot_set': False,
-    }
-
-    # === Lazy check-in max (1 byte) ===
-    lazy_checkin_max = payload[offset] if offset < len(payload) else 0
-    offset += 1
-
-    # === Indirect pivot len (1 byte) ===
-    indirect_pivot_len = payload[offset] if offset < len(payload) else 0
-    offset += 1
-
-    # === Indirect pivot (variable) ===
-    indirect_pivot = None
-    if indirect_pivot_len > 0 and offset + indirect_pivot_len <= len(payload):
-        indirect_pivot = payload[offset:offset+indirect_pivot_len].decode('utf-8', errors='replace')
-        offset += indirect_pivot_len
-        options['indirect_pivot_set'] = True
-
-    # === Pad max (2 bytes) ===
-    pad_max = 0
-    if offset + 2 <= len(payload):
-        pad_max = payload[offset] | (payload[offset + 1] << 8)
-        offset += 2
-
-    # === Num spoof frames (2 bytes) ===
-    num_spoof_frames = 0
-    if offset + 2 <= len(payload):
-        num_spoof_frames = payload[offset] | (payload[offset + 1] << 8)
-        offset += 2
-
-    # === SpawnTo x64 (len + string) ===
-    spawnto_x64 = None
-    spawnto_x64_len = 0
-    if offset < len(payload):
-        spawnto_x64_len = payload[offset]
-        offset += 1
-        if spawnto_x64_len > 0 and offset + spawnto_x64_len <= len(payload):
-            spawnto_x64 = payload[offset:offset+spawnto_x64_len].decode('utf-8', errors='replace')
-            offset += spawnto_x64_len
-
-    # === SpawnTo x86 (len + string) ===
-    spawnto_x86 = None
-    spawnto_x86_len = 0
-    if offset < len(payload):
-        spawnto_x86_len = payload[offset]
-        offset += 1
-        if spawnto_x86_len > 0 and offset + spawnto_x86_len <= len(payload):
-            spawnto_x86 = payload[offset:offset+spawnto_x86_len].decode('utf-8', errors='replace')
-            offset += spawnto_x86_len
-
-    # === Has global malleable (1 byte) ===
     global_malleable = None
-    has_malleable_config = False
-    if offset < len(payload):
-        has_global = payload[offset]
-        offset += 1
-        if has_global == 0x01:
-            has_malleable_config = True
-            result = _parse_malleable_block(payload, offset, len(payload))
-            if result:
-                global_malleable = result[0]
-                offset += result[1]
+    if has_global_malleable == 1:
+        global_malleable, consumed = _parse_malleable_block(payload, offset)
+        offset += consumed
 
-    # === Work Hours (6 bytes) ===
+    # --- Work hours ---
+    if offset + 6 > len(payload):
+        raise ValueError("Payload too small for work hours")
     work_hours = {
-        'enabled': False,
-        'start_hour': 9,
-        'start_minute': 0,
-        'end_hour': 17,
-        'end_minute': 0,
-        'insomnia': False
+        'enabled': bool(payload[offset]),
+        'start_hour': payload[offset + 1],
+        'start_minute': payload[offset + 2],
+        'end_hour': payload[offset + 3],
+        'end_minute': payload[offset + 4],
+        'insomnia': bool(payload[offset + 5]),
     }
-    if offset + 6 <= len(payload):
-        work_hours['enabled'] = bool(payload[offset])
-        work_hours['start_hour'] = payload[offset + 1]
-        work_hours['start_minute'] = payload[offset + 2]
-        work_hours['end_hour'] = payload[offset + 3]
-        work_hours['end_minute'] = payload[offset + 4]
-        work_hours['insomnia'] = bool(payload[offset + 5])
-        offset += 6
+    offset += 6
 
-    # === Stack spoof chain (2 byte count + per-entry module/func pairs) ===
-    stack_chain = []
-    if offset + 2 <= len(payload):
-        chain_count = payload[offset] | (payload[offset + 1] << 8)
+    # --- Stack chain ---
+    if offset + 2 > len(payload):
+        stack_chain = []
+    else:
+        stack_chain_count = payload[offset] | (payload[offset + 1] << 8)
         offset += 2
-        for _ in range(chain_count):
-            if offset + 6 > len(payload):
+        stack_chain = []
+        for _ in range(stack_chain_count):
+            if offset + 2 > len(payload):
                 break
-            off = payload[offset] | (payload[offset + 1] << 8) | \
-                  (payload[offset + 2] << 16) | (payload[offset + 3] << 24)
-            offset += 4
             mod_len = payload[offset]
             offset += 1
-            module = payload[offset:offset + mod_len].decode('utf-8', errors='replace') if mod_len else ''
+            module = payload[offset:offset + mod_len].decode('utf-8') if mod_len > 0 else ""
             offset += mod_len
-            fn_len = payload[offset]
-            offset += 1
-            function = payload[offset:offset + fn_len].decode('utf-8', errors='replace') if fn_len else ''
-            offset += fn_len
-            stack_chain.append({'module': module, 'function': function, 'offset': off})
+            if offset >= len(payload):
+                func_len = 0
+            else:
+                func_len = payload[offset]
+                offset += 1
+            function = payload[offset:offset + func_len].decode('utf-8') if func_len > 0 else ""
+            offset += func_len
+            stack_chain.append({'module': module, 'function': function})
 
-    # Convert kill date
-    kill_date_str = None
-    if kill_date and options['kill_date_set']:
-        try:
-            kill_date_str = datetime.fromtimestamp(kill_date).isoformat()
-        except (OSError, ValueError):
-            kill_date_str = str(kill_date)
-
-    return {
+    # --- Return parsed config ---
+    config = {
         'beacon_id': beacon_id,
         'crypto_key': crypto_key,
-        'c2_channels': channels,
-        'sleep_ms': sleep_ms,
-        'jitter_pct': jitter_pct,
-        'kill_date': kill_date_str,
-        'lazy_checkin_max': lazy_checkin_max,
-        'indirect_pivot': indirect_pivot,
-        'pad_max': pad_max,
-        'num_spoof_frames': num_spoof_frames,
-        'spawnto_x64': spawnto_x64,
-        'spawnto_x86': spawnto_x86,
-        'stack_spoof_chain': stack_chain,
-        'options': options,
-        'has_malleable_config': has_malleable_config,
+        'channels': channels,
         'global_malleable': global_malleable,
-        'work_hours': work_hours
+        'work_hours': work_hours,
+        'stack_chain': stack_chain,
     }
+    return config
 
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python config_decrypt.py <config.h|config.bin>")
+        print("Usage: python config_decrypt.py <generated_config.h|blob.bin>")
+        print("  For .h files: extracts blob, key, nonce from header and decrypts")
+        print("  For .bin files: requires key and nonce (not implemented for binary)")
         sys.exit(1)
 
     filepath = sys.argv[1]
 
-    # Load blob
-    print(f"[*] Loading: {filepath}")
-    try:
-        if filepath.endswith('.h'):
+    if filepath.endswith('.h') or filepath.endswith('.hpp'):
+        # Parse C++ header
+        try:
             blob, config_key, nonce = parse_cpp_header(filepath)
-        else:
-            blob = load_binary_blob(filepath)
-            config_key = None
-            nonce = None
-    except Exception as e:
-        print(f"[!] Failed to load: {e}")
-        sys.exit(1)
-
-    print(f"[+] Loaded {len(blob)} bytes")
+        except Exception as e:
+            print(f"[!] Failed to parse header: {e}")
+            sys.exit(1)
+    else:
+        # Load binary blob
+        blob = load_binary_blob(filepath)
+        config_key = None
+        nonce = None
+        if len(sys.argv) >= 4:
+            # Assume next two args are key and nonce hex strings
+            if len(sys.argv) >= 3:
+                config_key = bytes.fromhex(sys.argv[2])
+            if len(sys.argv) >= 4:
+                nonce = bytes.fromhex(sys.argv[3])
+        if config_key is None or nonce is None:
+            print("[!] Binary blob requires config_key and nonce as hex strings")
+            print("Usage: python config_decrypt.py blob.bin <config_key_hex> <nonce_hex>")
+            sys.exit(1)
 
     # Decrypt and parse
     try:
@@ -520,10 +421,10 @@ def main():
     print("\n" + "=" * 60)
     print("CONFIG BLOB INFO")
     print("=" * 60)
-    print(f"Magic:         0x{result['magic']:08X} ({'VALID' if result['magic'] == PCFG_MAGIC else 'INVALID'})")
+    print(f"Magic:         0x{result['magic']:08X} (per-build randomized)")
     print(f"Version:       {result['version']}")
     print(f"Encryption:    {result.get('encryption_method', 'Unknown')}")
-    
+
     if result['version'] == PCFG_VERSION_XCHACHA:
         print(f"Encrypted:     Yes (XChaCha20-Poly1305)")
     elif result['version'] == PCFG_VERSION_XOR:
@@ -533,57 +434,13 @@ def main():
     print("\n" + "=" * 60)
     print("BEACON CONFIG")
     print("=" * 60)
-    print(f"Beacon ID:     {config['beacon_id']}")
-    print(f"Crypto Key:    {config['crypto_key']}")
-    print(f"Sleep:         {config['sleep_ms']}ms (+{config['jitter_pct']}% jitter)")
-
-    if config['kill_date']:
-        print(f"Kill Date:     {config['kill_date']}")
-
-    if config.get('indirect_pivot'):
-        print(f"Indirect Pivot: {config['indirect_pivot']}")
-
-    if config.get('pad_max', 0) > 0:
-        print(f"Pad Max:       {config['pad_max']} bytes")
-
-    nsf = config.get('num_spoof_frames', 0)
-    if nsf > 0:
-        print(f"Spoof Frames:  {nsf} frames")
-
-    if config.get('spawnto_x64'):
-        print(f"SpawnTo x64:   {config['spawnto_x64']}")
-    if config.get('spawnto_x86'):
-        print(f"SpawnTo x86:   {config['spawnto_x86']}")
-
-    if config.get('lazy_checkin_max', 0) > 0:
-        print(f"Lazy Checkin:  max={config['lazy_checkin_max']}")
-
-    chain = config.get('stack_spoof_chain', [])
-    if chain:
-        print(f"\nStack Spoof Chain ({len(chain)} entries):")
-        for entry in chain:
-            off = entry.get('offset', 0)
-            if off:
-                print(f"  {entry['module']}!{entry['function']}+0x{off:X}")
-            else:
-                print(f"  {entry['module']}!{entry['function']} (scan)")
-
-    print(f"\nOptions:")
-    opts = config['options']
-    for k, v in opts.items():
-        print(f"  - {k}: {v}")
-
-    wh = config.get('work_hours', {})
-    if wh.get('enabled'):
-        print(f"\nWork Hours:")
-        print(f"  - Time:      {wh['start_hour']:02d}:{wh['start_minute']:02d} - {wh['end_hour']:02d}:{wh['end_minute']:02d}")
-        print(f"  - Insomnia: {wh['insomnia']}")
-
-    print(f"\nC2 Channels ({len(config['c2_channels'])}):")
-    for i, ch in enumerate(config['c2_channels']):
-        print(f"  [{i}] {ch['type']} {ch['host']}:{ch['port']}{ch['path']} (HTTP: {ch['http_method']})")
-        print(f"      UA: {ch['user_agent']}")
-        print(f"      Failures: {ch['max_consecutive_failures']}, Backoff: {ch['backoff_sleep_ms']}ms")
+    config = config
+    print(f"Beacon ID:    {config['beacon_id']}")
+    print(f"Crypto Key:   {config['crypto_key']}")
+    print(f"Channels:     {len(config['channels'])}")
+    for i, ch in enumerate(config['channels']):
+        print(f"  [{i}] {ch['type']} -> {ch['host']}:{ch['port']}{ch['path']} ({ch['http_method']})")
+        print(f"      Max Fails: {ch['max_consecutive_failures']}, Backoff: {ch['backoff_sleep_ms']}ms")
         print(f"      Malleable: {ch['malleable_mode']}")
         if 'malleable_config' in ch:
             mcfg = ch['malleable_config']
@@ -595,6 +452,8 @@ def main():
                 print(f"      Headers: {len(hdrs)}")
                 for h in hdrs:
                     print(f"        {h['name']}: {h['value']}")
+            loc = mcfg.get('payload_location', {})
+            print(f"      Location: {loc.get('type', 'unknown')}")
 
     # Global malleable
     gm = config.get('global_malleable')
@@ -611,8 +470,16 @@ def main():
         loc = gm.get('payload_location', {})
         print(f"  Location: {loc.get('type', 'unknown')}")
 
-    print("\n" + "=" * 60)
+    print("\nWork Hours:")
+    wh = config.get('work_hours', {})
+    print(f"  Enabled: {wh.get('enabled', False)}")
+    print(f"  {wh.get('start_hour', 0):02d}:{wh.get('start_minute', 0):02d} - {wh.get('end_hour', 0):02d}:{wh.get('end_minute', 0):02d}")
+    print(f"  Insomnia: {wh.get('insomnia', False)}")
+
+    print("\nStack Chain:")
+    for entry in config.get('stack_chain', []):
+        print(f"  {entry['module']}!{entry['function']}")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

