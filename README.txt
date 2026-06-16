@@ -48,14 +48,32 @@ Mama look, I finally reached a major version after 1.5 months of development!
             `"""""""""""""'         '
 
 ================================================================================
-                         NOTICE - READ THIS FIRST
-================================================================================
+                     LICENSE & TERMS OF USE
+===============================================================================
 
-  The authors release this framework as a demonstration of capability.
-It is the user's sole responsibility to ensure compliance with all
-applicable laws and to obtain written authorization before deploying
-it against any system you do not own. This tool is explictly only designed for
-students and authorized red-team operators. Do no evil.
+  Pandragon is released under the Polyform Noncommercial License 1.0.0.
+See the LICENSE file in the repository root for the full terms.
+
+  In short: you may use, modify, and share this software for any
+noncommercial purpose — including personal research, education, public
+security testing, and hobby projects. Commercial use requires a separate
+license from the authors.
+
+                         AUTHORIZED USE ONLY
+------------------------------------------------------------------------------
+
+  This framework is intended exclusively for:
+  • Authorized penetration testing with written permission from the target
+    system owner(s)
+  • Academic research and cybersecurity education in controlled environments
+  • Personal security research on systems you own or have explicit permission
+    to test
+
+  Use of this tool against any system without prior written authorization
+is illegal and unethical. The authors disclaim all liability for misuse.
+
+  If you are a student or red-team operator with proper authorization, you're
+welcome here. If you intend to use this for any other purpose, stop now.
 
 ================================================================================
                                 OVERVIEW
