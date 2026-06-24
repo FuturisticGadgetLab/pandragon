@@ -434,7 +434,7 @@ How it works:
 
 Route-Based Identification (HTTP):
   - Incoming requests are matched against each beacon's allowed_routes
-  - Matches on path, User-Agent, HTTP method, and malleable C2 headers
+  - Matches on poll_path (GET) or submit_path (POST), User-Agent, and malleable C2 headers
   - Macros (${TIMESTAMP}, ${RAND_B64:N}, ${JUNK:N}) are expanded as regex
   - Only requests matching a known route are forwarded for decryption
 
@@ -456,7 +456,7 @@ Beacon config is compiled to encrypted binary blob via tools/config_builder.py.
 JSON schema available in Beacon/config/schema.json.
 
 Key options:
-  - c2_channels: Array of {type, host, port, path, user_agent, http_method}
+  - c2_channels: Array of {type, host, port, poll_path, submit_path, user_agent}
   - sleep_ms: Base check-in interval
   - jitter_pct: Random variation (0-100)
   - use_indirect_syscalls: Enable HWBP syscall system
