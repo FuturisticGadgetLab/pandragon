@@ -120,7 +120,7 @@ void AsyncBofManager::reapCycle() {
     while (cur) {
         next = cur->next;
 
-        if (cur->bof_class == BOF_CLASS_BLOCKING) {
+        if (cur->bof_class == BOF_CLASS::BLOCKING) {
             cur = next;
             continue;
         }
@@ -228,7 +228,7 @@ void AsyncBofManager::reapCycle() {
 void AsyncBofManager::dispatchCommands() {
     async_bof_state* cur = m_head;
     while (cur) {
-        if (cur->bof_class != BOF_CLASS_LONG_RUNNING || !cur->channel) {
+        if (cur->bof_class != BOF_CLASS::LONG_RUNNING || !cur->channel) {
             cur = cur->next;
             continue;
         }

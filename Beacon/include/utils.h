@@ -125,7 +125,7 @@ int __vsprintf(char* buf, const char* fmt, va_list args);
 int __vsnprintf(char *buf, size_t limit, const char *fmt, va_list args);
 
 void* __calloc(SIZE_T num, SIZE_T size);
-void* __malloc(SIZE_T size);
+[[nodiscard]] void* __malloc(SIZE_T size);
 void  __free(void* ptr);
 uint16_t __htons(uint16_t v);
 uint16_t __ntohs(uint16_t v);

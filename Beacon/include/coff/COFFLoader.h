@@ -15,6 +15,7 @@ typedef struct coff_file_header {
     uint16_t Characteristics;
 } coff_file_header_t;
 #pragma pack(pop)
+static_assert(sizeof(coff_file_header_t) == 20, "COFF file header must be 20 bytes");
 
 #define MACHINETYPE_AMD64 0x8664
 
@@ -54,6 +55,10 @@ typedef struct coff_sym {
 } coff_sym_t;
 
 #pragma pack(pop)
+
+static_assert(sizeof(coff_sect_t) == 40, "COFF section header must be 40 bytes");
+static_assert(sizeof(coff_reloc_t) == 10, "COFF relocation entry must be 10 bytes");
+static_assert(sizeof(coff_sym_t) == 18, "COFF symbol entry must be 18 bytes");
 
 #define IMAGE_REL_AMD64_ABSOLUTE    0x0000
 #define IMAGE_REL_AMD64_ADDR64      0x0001

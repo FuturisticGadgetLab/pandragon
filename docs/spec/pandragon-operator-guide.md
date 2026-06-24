@@ -22,7 +22,7 @@ Pandragon is a modular, high-stealth Command and Control (C2) framework built fo
 | `jitter_pct` | uint8_t | 20 | Sleep variance (timing entropy). |
 | `use_indirect_syscalls`| Boolean | false | Use HWBP+VEH to redirect syscalls through ntdll stubs. |
 | `bypass_etw` | Boolean | true | Hardware-breakpoint based silencing of `NtTraceEvent`. |
-| `sleep_obfuscation` | String | "ekko" | Memory encryption strategy during idle periods. |
+| `sleep_obfuscation` | String | "ekko" | Memory encryption strategy during idle periods. Valid values: `"none"`, `"ekko"`, `"morpheus"`, `"foliage"`. Morpheus uses RtlWaitOnAddress (no APC timers, ntdll-only). |
 | `sleep_stack_spoof` | Boolean | false | Stack pivoting to a helper region during sleep. |
 
 ### `beacon_id`
@@ -139,7 +139,7 @@ Recommended settings for high-value targets:
 4.  **`bypass_etw`**: `true` (Uses HWBP to avoid memory patching detection).
 5.  **`sleep_ms`**: `300000` (5 minutes) for long-haul persistence.
 6.  **`jitter_pct`**: `35` (High entropy in callback timing).
-7.  **`sleep_obfuscation`**: `"ekko"` (Ensures code is encrypted while idle).
+7.  **`sleep_obfuscation`**: `"morpheus"` (Sleeps via RtlWaitOnAddress; encrypts .text sections with XOR. Alternatives: `"ekko"` for APC-based, `"foliage"` for timer-based).
 8.  **`sleep_stack_spoof`**: `true` (Hides the beacon's call stack from memory scanners).
 9.  **`use_indirect_syscalls`**: `true` (Bypasses all user-mode EDR hooks).
 10. **`validate_ssl`**: `true` (Always use valid certificates to avoid TLS interception alerts).

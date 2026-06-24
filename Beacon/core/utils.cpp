@@ -2345,17 +2345,16 @@ NAKED void ___chkstk_ms(void) {
     __asm__ volatile (
         "push   %rax                  \n\t"
         "push   %rcx                  \n\t"
-        "mov    %gs:(0x10), %rcx     \n\t" // rcx = TIB->StackLimit
         "neg    %rax                  \n\t" // rax = -frame_size
-        "add    %rsp, %rax           \n\t" // rax = target frame low address
-        "jb     1f                     \n\t" // If overflow (unsigned <), jump to 1
-        "xor    %eax, %eax           \n\t" // Overflowed: frame low address = 0
+        "add    %rsp, %rax           \n\t" // rax = target = rsp - frame_size
+        "mov    %gs:(0x10), %rcx     \n\t" // rcx = TIB->StackLimit
+        "jmp    1f                     \n\t" // skip first sub/probe, go to cmp
         "0:                            \n\t"
-        "sub    $0x1000, %rcx         \n\t" // Move down one page (4096 bytes)
-        "test   %eax, (%rcx)         \n\t" // Probe: read/write to commit page
+        "sub    $0x1000, %rcx         \n\t" // rcx -= 4KB
+        "test   %eax, (%rcx)         \n\t" // probe
         "1:                            \n\t"
-        "cmp    %rax, %rcx           \n\t" // Have we reached the target low address?
-        "ja     0b                     \n\t" // If rcx > rax, continue looping
+        "cmp    %rax, %rcx           \n\t" // rcx > target?
+        "ja     0b                     \n\t" // yes → keep probing
         "pop    %rcx                  \n\t"
         "pop    %rax                  \n\t"
         "ret                           \n\t"
@@ -2369,17 +2368,16 @@ NAKED void __chkstk(void) {
     __asm__ volatile (
         "push   %rax                  \n\t"
         "push   %rcx                  \n\t"
-        "mov    %gs:(0x10), %rcx     \n\t" 
-        "neg    %rax                  \n\t" 
-        "add    %rsp, %rax           \n\t" 
-        "jb     1f                     \n\t" 
-        "xor    %eax, %eax           \n\t" 
+        "neg    %rax                  \n\t"
+        "add    %rsp, %rax           \n\t"
+        "mov    %gs:(0x10), %rcx     \n\t"
+        "jmp    1f                     \n\t"
         "0:                            \n\t"
-        "sub    $0x1000, %rcx         \n\t" 
-        "test   %eax, (%rcx)         \n\t" 
+        "sub    $0x1000, %rcx         \n\t"
+        "test   %eax, (%rcx)         \n\t"
         "1:                            \n\t"
-        "cmp    %rax, %rcx           \n\t" 
-        "ja     0b                     \n\t" 
+        "cmp    %rax, %rcx           \n\t"
+        "ja     0b                     \n\t"
         "pop    %rcx                  \n\t"
         "pop    %rax                  \n\t"
         "ret                           \n\t"

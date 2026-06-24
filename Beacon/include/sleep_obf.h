@@ -49,3 +49,9 @@ bool SleepObf_Ekko(
     const BeaconConfig* config,
     uint32_t          sleep_ms,
     uint8_t           jitter_pct);
+
+bool SleepObf_Morpheus(
+    functionTable*  nt,
+    const BeaconConfig* config,
+    uint32_t          sleep_ms,
+    uint8_t           jitter_pct);

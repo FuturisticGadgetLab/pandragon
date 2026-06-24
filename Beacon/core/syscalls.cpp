@@ -53,11 +53,11 @@ bool initSyscalls(SYSCALLS_ID ID) {
 
     bool result = false;
     switch(ID) {
-        case SYSCALL_HWSYSCALLS:
+        case SYSCALLS_ID::HWSYSCALLS:
             result = InitHWSyscalls();
             break;
 
-        case SYSCALL_UNDEFINED:
+        case SYSCALLS_ID::UNDEFINED:
         default:
             g_debugPrint("[!] Unsupported or undefined syscall method: %i", (int)ID);
             result = false;

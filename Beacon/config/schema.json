@@ -23,7 +23,7 @@
             "maxItems": 4,
             "items": {
                 "type": "object",
-                "required": ["type", "host", "port", "path", "user_agent", "max_consecutive_failures", "backoff_sleep_ms"],
+                "required": ["type", "host", "port", "poll_path", "submit_path", "user_agent", "max_consecutive_failures", "backoff_sleep_ms"],
                 "properties": {
                     "type": {
                         "type": "string",
@@ -42,17 +42,23 @@
                         "minimum": 1,
                         "maximum": 65535
                     },
-                    "path": {
+                    "poll_path": {
                         "type": "string",
-                        "description": "HTTP request path",
+                        "description": "HTTP GET path for poll operations",
                         "minLength": 1,
-                        "maxLength": 256
+                        "maxLength": 255
+                    },
+                    "submit_path": {
+                        "type": "string",
+                        "description": "HTTP POST path for submit operations",
+                        "minLength": 1,
+                        "maxLength": 255
                     },
                     "user_agent": {
                         "type": "string",
                         "description": "User-Agent header",
                         "minLength": 1,
-                        "maxLength": 256
+                        "maxLength": 255
                     },
                     "max_consecutive_failures": {
                         "type": "integer",
@@ -66,18 +72,13 @@
                         "minimum": 1000,
                         "maximum": 300000
                     },
-                    "http_method": {
-                        "type": "string",
-                        "enum": ["GET", "POST"],
-                        "description": "HTTP method for data transmission. GET uses query strings, POST uses request body (better for large payloads)"
-                    },
-                    "malleable_config": {
+                    "poll_malleable_config": {
                         "type": "object",
-                        "description": "Per-channel malleable config (overrides global). If absent, uses global malleable config. TCP channels should omit this.",
+                        "description": "Per-channel poll (GET) malleable config. If absent, uses global poll_malleable_config.",
                         "properties": {
                             "wrapper": {
                                 "type": "object",
-                                "description": "Prefix/suffix wrapper for base64url-encoded payloads (NOT encrypted)",
+                                "description": "Prefix/suffix wrapper for base64url-encoded poll payloads",
                                 "properties": {
                                     "prefix": {
                                         "type": "string",
@@ -94,7 +95,7 @@
                             },
                             "http_headers": {
                                 "type": "array",
-                                "description": "Custom HTTP headers to add to every request",
+                                "description": "Custom HTTP headers for poll requests",
                                 "maxItems": 255,
                                 "items": {
                                     "type": "object",
@@ -104,12 +105,12 @@
                                             "type": "string",
                                             "description": "HTTP header name",
                                             "minLength": 1,
-                                            "maxLength": 256
+                                            "maxLength": 255
                                         },
                                         "value": {
                                             "type": "string",
                                             "description": "HTTP header value",
-                                            "maxLength": 1024
+                                            "maxLength": 255
                                         }
                                     }
                                 }
@@ -117,32 +118,247 @@
                             "payload_location": {
                                 "type": "object",
                                 "required": ["type"],
-                                "description": "Where to place the (wrapped) payload in the HTTP request",
+                                "description": "Where to place the (wrapped) payload in the GET request",
                                 "properties": {
                                     "type": {
                                         "type": "string",
-                                        "enum": ["query_param", "path", "body"],
-                                        "description": "Location type: query_param (?q=PAYLOAD), path (/PREFIXPAYLOADSUFFIX), or body (POST data)"
+                                        "enum": ["query_param", "path"],
+                                        "description": "Location type: query_param (?q=PAYLOAD) or path (/PREFIXPAYLOADSUFFIX)"
                                     },
                                     "param_name": {
                                         "type": "string",
                                         "description": "Query parameter name (for query_param type)",
-                                        "maxLength": 256
+                                        "maxLength": 255
                                     },
                                     "path_prefix": {
                                         "type": "string",
                                         "description": "Prefix to add before payload in path mode",
-                                        "maxLength": 256
+                                        "maxLength": 255
                                     },
                                     "path_suffix": {
                                         "type": "string",
                                         "description": "Suffix to add after payload in path mode (e.g., .png)",
-                                        "maxLength": 256
+                                        "maxLength": 255
+                                    },
+                                    "body_content_type": {
+                                        "type": "string",
+                                        "description": "Content-Type (reserved for future use with poll)",
+                                        "enum": ["text/plain", "application/octet-stream"]
+                                    },
+                                    "cookie_name": {
+                                        "type": "string",
+                                        "description": "Cookie name for request-side Cookie header injection",
+                                        "maxLength": 255
+                                    }
+                                },
+                                "additionalProperties": false
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    "submit_malleable_config": {
+                        "type": "object",
+                        "description": "Per-channel submit (POST) malleable config. If absent, uses global submit_malleable_config.",
+                        "properties": {
+                            "wrapper": {
+                                "type": "object",
+                                "description": "Prefix/suffix wrapper for base64url-encoded submit payloads",
+                                "properties": {
+                                    "prefix": {
+                                        "type": "string",
+                                        "description": "String to prepend to payload",
+                                        "maxLength": 65535
+                                    },
+                                    "suffix": {
+                                        "type": "string",
+                                        "description": "String to append to payload",
+                                        "maxLength": 65535
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "http_headers": {
+                                "type": "array",
+                                "description": "Custom HTTP headers for submit requests",
+                                "maxItems": 255,
+                                "items": {
+                                    "type": "object",
+                                    "required": ["name", "value"],
+                                    "properties": {
+                                        "name": {
+                                            "type": "string",
+                                            "description": "HTTP header name",
+                                            "minLength": 1,
+                                            "maxLength": 255
+                                        },
+                                        "value": {
+                                            "type": "string",
+                                            "description": "HTTP header value",
+                                            "maxLength": 255
+                                        }
+                                    }
+                                }
+                            },
+                            "payload_location": {
+                                "type": "object",
+                                "required": ["type"],
+                                "description": "Where to place the (wrapped) payload in the POST request",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["body", "query_param", "path"],
+                                        "description": "Location type: body (POST data), query_param, or path"
+                                    },
+                                    "param_name": {
+                                        "type": "string",
+                                        "description": "Query parameter name (for query_param type)",
+                                        "maxLength": 255
+                                    },
+                                    "path_prefix": {
+                                        "type": "string",
+                                        "description": "Prefix to add before payload in path mode",
+                                        "maxLength": 255
+                                    },
+                                    "path_suffix": {
+                                        "type": "string",
+                                        "description": "Suffix to add after payload in path mode",
+                                        "maxLength": 255
                                     },
                                     "body_content_type": {
                                         "type": "string",
                                         "description": "Content-Type for body mode",
                                         "enum": ["text/plain", "application/octet-stream"]
+                                    },
+                                    "cookie_name": {
+                                        "type": "string",
+                                        "description": "Cookie name for request-side Cookie header injection",
+                                        "maxLength": 255
+                                    }
+                                },
+                                "additionalProperties": false
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    "poll_response_malleable_config": {
+                        "type": "object",
+                        "description": "Per-channel poll response malleable config. Controls how poll responses are wrapped.",
+                        "properties": {
+                            "wrapper": {
+                                "type": "object",
+                                "description": "Prefix/suffix wrapper for poll response payloads",
+                                "properties": {
+                                    "prefix": {
+                                        "type": "string",
+                                        "description": "String to prepend to response",
+                                        "maxLength": 65535
+                                    },
+                                    "suffix": {
+                                        "type": "string",
+                                        "description": "String to append to response",
+                                        "maxLength": 65535
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "headers": {
+                                "type": "object",
+                                "description": "Custom HTTP headers for poll responses",
+                                "patternProperties": {
+                                    "^[A-Za-z0-9_-]+$": {
+                                        "type": "string",
+                                        "maxLength": 1024
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "body_template": {
+                                "type": "string",
+                                "description": "Poll response body template. Use {{PAYLOAD}} as placeholder.",
+                                "maxLength": 65535
+                            },
+                            "status_code": {
+                                "type": "integer",
+                                "description": "HTTP response status code",
+                                "minimum": 100,
+                                "maximum": 599
+                            },
+                            "payload_location": {
+                                "type": "object",
+                                "description": "Poll response payload delivery method",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["query_param", "path", "body"],
+                                        "description": "Payload location type (required for serialization)"
+                                    },
+                                    "cookie_name": {
+                                        "type": "string",
+                                        "description": "Cookie name for Set-Cookie response delivery",
+                                        "maxLength": 255
+                                    }
+                                },
+                                "additionalProperties": false
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    "submit_response_malleable_config": {
+                        "type": "object",
+                        "description": "Per-channel submit response malleable config. Controls how submit responses are wrapped.",
+                        "properties": {
+                            "wrapper": {
+                                "type": "object",
+                                "description": "Prefix/suffix wrapper for submit response payloads",
+                                "properties": {
+                                    "prefix": {
+                                        "type": "string",
+                                        "description": "String to prepend to response",
+                                        "maxLength": 65535
+                                    },
+                                    "suffix": {
+                                        "type": "string",
+                                        "description": "String to append to response",
+                                        "maxLength": 65535
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "headers": {
+                                "type": "object",
+                                "description": "Custom HTTP headers for submit responses",
+                                "patternProperties": {
+                                    "^[A-Za-z0-9_-]+$": {
+                                        "type": "string",
+                                        "maxLength": 1024
+                                    }
+                                },
+                                "additionalProperties": false
+                            },
+                            "body_template": {
+                                "type": "string",
+                                "description": "Submit response body template. Use {{PAYLOAD}} as placeholder.",
+                                "maxLength": 65535
+                            },
+                            "status_code": {
+                                "type": "integer",
+                                "description": "HTTP response status code",
+                                "minimum": 100,
+                                "maximum": 599
+                            },
+                            "payload_location": {
+                                "type": "object",
+                                "description": "Submit response payload delivery method",
+                                "properties": {
+                                    "type": {
+                                        "type": "string",
+                                        "enum": ["query_param", "path", "body"],
+                                        "description": "Payload location type (required for serialization)"
+                                    },
+                                    "cookie_name": {
+                                        "type": "string",
+                                        "description": "Cookie name for Set-Cookie response delivery",
+                                        "maxLength": 255
                                     }
                                 },
                                 "additionalProperties": false
@@ -191,30 +407,30 @@
         },
         "sleep_obfuscation": {
             "type": "string",
-            "enum": ["none", "ekko", "ekko_runtime", "foliage"],
+            "enum": ["none", "ekko", "ekko_runtime", "morpheus", "foliage"],
             "default": "none",
-            "description": "Sleep obfuscation method. 'ekko' = .obf section (static), 'ekko_runtime' = runtime RX allocation (dynamic), 'foliage' = future"
+            "description": "Sleep obfuscation method"
         },
         "sleep_wipe_pe_headers": {
             "type": "boolean",
             "default": false,
-            "description": "If true, zero out PE headers during sleep to avoid memory scanner detection"
+            "description": "If true, zero out PE headers during sleep"
         },
         "sleep_stack_spoof": {
             "type": "boolean",
             "default": false,
-            "description": "If true, swap NT_TIB (StackLimit/StackBase) during sleep obfuscation ROP chain"
+            "description": "If true, swap NT_TIB during sleep obfuscation ROP chain"
         },
         "num_spoof_frames": {
             "type": "integer",
             "default": 6,
             "minimum": 0,
             "maximum": 65535,
-            "description": "Number of fake return-address frames to write on the spoofed sleep stack (0 = use default of 6)"
+            "description": "Number of fake return-address frames on the spoofed sleep stack"
         },
         "stack_spoof_chain": {
             "type": "array",
-            "description": "Ordered list of module!function pairs whose last ret instruction is used as fake return addresses on the spoofed sleep stack. Cycled through for num_spoof_frames writes. If empty, Python builder prepends ntdll!RtlUserThreadStart + kernel32!BaseThreadInitThunk.",
+            "description": "Ordered list of module!function pairs for fake return addresses",
             "maxItems": 256,
             "items": {
                 "type": "object",
@@ -222,13 +438,13 @@
                 "properties": {
                     "module": {
                         "type": "string",
-                        "description": "DLL module name (e.g. user32.dll)",
+                        "description": "DLL module name",
                         "minLength": 1,
                         "maxLength": 255
                     },
                     "function": {
                         "type": "string",
-                        "description": "Export function name (e.g. ZwUserGetMessage)",
+                        "description": "Export function name",
                         "minLength": 1,
                         "maxLength": 255
                     },
@@ -237,7 +453,7 @@
                         "default": 0,
                         "minimum": 0,
                         "maximum": 4294967295,
-                        "description": "Explicit byte offset from function start (0 = auto-scan for last ret). When set, uses funcRVA + offset directly instead of scanning."
+                        "description": "Explicit byte offset from function start (0 = auto-scan)"
                     }
                 },
                 "additionalProperties": false
@@ -263,7 +479,7 @@
                 },
                 "validate_ssl": {
                     "type": "boolean",
-                    "description": "If true, validate SSL certificates (for production). If false, ignore cert errors (for testing)"
+                    "description": "If true, validate SSL certificates. If false, ignore cert errors."
                 }
             },
             "additionalProperties": false
@@ -287,13 +503,13 @@
             "maximum": 1073741824,
             "description": "Maximum response body size in bytes (default 64MB)"
         },
-        "malleable_config": {
+        "poll_malleable_config": {
             "type": "object",
-            "description": "Malleable network configuration for exfil obfuscation",
+            "description": "Global poll (GET) malleable config. Used when a channel has no per-channel poll_malleable_config.",
             "properties": {
                 "wrapper": {
                     "type": "object",
-                    "description": "Prefix/suffix wrapper for base64url-encoded payloads (NOT encrypted)",
+                    "description": "Prefix/suffix wrapper for base64url-encoded poll payloads",
                     "properties": {
                         "prefix": {
                             "type": "string",
@@ -310,7 +526,7 @@
                 },
                 "http_headers": {
                     "type": "array",
-                    "description": "Custom HTTP headers to add to every request",
+                    "description": "Custom HTTP headers for poll requests",
                     "maxItems": 255,
                     "items": {
                         "type": "object",
@@ -320,12 +536,12 @@
                                 "type": "string",
                                 "description": "HTTP header name",
                                 "minLength": 1,
-                                "maxLength": 64
+                                "maxLength": 255
                             },
                             "value": {
                                 "type": "string",
                                 "description": "HTTP header value",
-                                "maxLength": 1024
+                                "maxLength": 255
                             }
                         }
                     }
@@ -333,41 +549,255 @@
                 "payload_location": {
                     "type": "object",
                     "required": ["type"],
-                    "description": "Where to place the (wrapped) payload in the HTTP request",
+                    "description": "Where to place the (wrapped) payload in the GET request",
                     "properties": {
                         "type": {
                             "type": "string",
-                            "enum": ["query_param", "path", "body"],
-                            "description": "Location type: query_param (?q=PAYLOAD), path (/PREFIXPAYLOADSUFFIX), or body (POST data)"
+                            "enum": ["query_param", "path"],
+                            "description": "Location type: query_param (?q=PAYLOAD) or path (/PREFIXPAYLOADSUFFIX)"
                         },
                         "param_name": {
                             "type": "string",
                             "description": "Query parameter name (for query_param type)",
-                            "maxLength": 64
+                            "maxLength": 255
                         },
                         "path_prefix": {
                             "type": "string",
                             "description": "Prefix to add before payload in path mode",
-                            "maxLength": 256
+                            "maxLength": 255
                         },
                         "path_suffix": {
                             "type": "string",
                             "description": "Suffix to add after payload in path mode (e.g., .png)",
-                            "maxLength": 64
+                            "maxLength": 255
                         },
                         "body_content_type": {
                             "type": "string",
-                            "description": "Content-Type for body mode",
+                            "description": "Content-Type (reserved)",
                             "enum": ["text/plain", "application/octet-stream"]
+                        },
+                        "cookie_name": {
+                            "type": "string",
+                            "description": "Cookie name for request-side Cookie header injection",
+                            "maxLength": 255
                         }
                     },
                     "additionalProperties": false
                 }
             }
         },
+        "submit_malleable_config": {
+            "type": "object",
+            "description": "Global submit (POST) malleable config. Used when a channel has no per-channel submit_malleable_config.",
+            "properties": {
+                "wrapper": {
+                    "type": "object",
+                    "description": "Prefix/suffix wrapper for base64url-encoded submit payloads",
+                    "properties": {
+                        "prefix": {
+                            "type": "string",
+                            "description": "String to prepend to payload",
+                            "maxLength": 65535
+                        },
+                        "suffix": {
+                            "type": "string",
+                            "description": "String to append to payload",
+                            "maxLength": 65535
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "http_headers": {
+                    "type": "array",
+                    "description": "Custom HTTP headers for submit requests",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "object",
+                        "required": ["name", "value"],
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "description": "HTTP header name",
+                                "minLength": 1,
+                                "maxLength": 255
+                            },
+                            "value": {
+                                "type": "string",
+                                "description": "HTTP header value",
+                                "maxLength": 255
+                            }
+                        }
+                    }
+                },
+                "payload_location": {
+                    "type": "object",
+                    "required": ["type"],
+                    "description": "Where to place the (wrapped) payload in the POST request",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["body", "query_param", "path"],
+                            "description": "Location type: body (POST data), query_param, or path"
+                        },
+                        "param_name": {
+                            "type": "string",
+                            "description": "Query parameter name (for query_param type)",
+                            "maxLength": 255
+                        },
+                        "path_prefix": {
+                            "type": "string",
+                            "description": "Prefix to add before payload in path mode",
+                            "maxLength": 255
+                        },
+                        "path_suffix": {
+                            "type": "string",
+                            "description": "Suffix to add after payload in path mode",
+                            "maxLength": 255
+                        },
+                        "body_content_type": {
+                            "type": "string",
+                            "description": "Content-Type for body mode",
+                            "enum": ["text/plain", "application/octet-stream"]
+                        },
+                        "cookie_name": {
+                            "type": "string",
+                            "description": "Cookie name for request-side Cookie header injection",
+                            "maxLength": 255
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            }
+        },
+        "poll_response_malleable_config": {
+            "type": "object",
+            "description": "Global poll response malleable config. Controls how poll responses are wrapped.",
+            "properties": {
+                "wrapper": {
+                    "type": "object",
+                    "description": "Prefix/suffix wrapper for poll response payloads",
+                    "properties": {
+                        "prefix": {
+                            "type": "string",
+                            "description": "String to prepend to response",
+                            "maxLength": 65535
+                        },
+                        "suffix": {
+                            "type": "string",
+                            "description": "String to append to response",
+                            "maxLength": 65535
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "headers": {
+                    "type": "object",
+                    "description": "Custom HTTP headers for poll responses",
+                    "patternProperties": {
+                        "^[A-Za-z0-9_-]+$": {
+                            "type": "string",
+                            "maxLength": 1024
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "body_template": {
+                    "type": "string",
+                    "description": "Poll response body template. Use {{PAYLOAD}} as placeholder.",
+                    "maxLength": 65535
+                },
+                "status_code": {
+                    "type": "integer",
+                    "description": "HTTP response status code",
+                    "minimum": 100,
+                    "maximum": 599
+                },
+                "payload_location": {
+                    "type": "object",
+                    "description": "Poll response payload delivery method",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["query_param", "path", "body"],
+                            "description": "Payload location type (required for serialization)"
+                        },
+                        "cookie_name": {
+                            "type": "string",
+                            "description": "Cookie name for Set-Cookie response delivery",
+                            "maxLength": 255
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        },
+        "submit_response_malleable_config": {
+            "type": "object",
+            "description": "Global submit response malleable config. Controls how submit responses are wrapped.",
+            "properties": {
+                "wrapper": {
+                    "type": "object",
+                    "description": "Prefix/suffix wrapper for submit response payloads",
+                    "properties": {
+                        "prefix": {
+                            "type": "string",
+                            "description": "String to prepend to response",
+                            "maxLength": 65535
+                        },
+                        "suffix": {
+                            "type": "string",
+                            "description": "String to append to response",
+                            "maxLength": 65535
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "headers": {
+                    "type": "object",
+                    "description": "Custom HTTP headers for submit responses",
+                    "patternProperties": {
+                        "^[A-Za-z0-9_-]+$": {
+                            "type": "string",
+                            "maxLength": 1024
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "body_template": {
+                    "type": "string",
+                    "description": "Submit response body template. Use {{PAYLOAD}} as placeholder.",
+                    "maxLength": 65535
+                },
+                "status_code": {
+                    "type": "integer",
+                    "description": "HTTP response status code",
+                    "minimum": 100,
+                    "maximum": 599
+                },
+                "payload_location": {
+                    "type": "object",
+                    "description": "Submit response payload delivery method",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": ["query_param", "path", "body"],
+                            "description": "Payload location type (required for serialization)"
+                        },
+                        "cookie_name": {
+                            "type": "string",
+                            "description": "Cookie name for Set-Cookie response delivery",
+                            "maxLength": 255
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        },
         "work_hours": {
             "type": "object",
-            "description": "UTC-based work hours configuration for beacon connectivity",
+            "description": "UTC-based work hours configuration",
             "properties": {
                 "enabled": {
                     "type": "boolean",
@@ -399,7 +829,7 @@
                 },
                 "insomnia": {
                     "type": "boolean",
-                    "description": "If true: wake up normally but skip check-in. If false: sleep until work hours start"
+                    "description": "If true: wake up normally but skip check-in. If false: sleep until work hours start."
                 }
             },
             "required": ["enabled", "start_hour", "start_minute", "end_hour", "end_minute", "insomnia"],
@@ -407,7 +837,7 @@
         },
         "spawnto": {
             "type": "object",
-            "description": "Spawn-to process for process injection (supports %%ENV_VAR%% runtime expansion)",
+            "description": "Spawn-to process for process injection",
             "properties": {
                 "x64": {
                     "type": "string",
@@ -425,7 +855,7 @@
             "properties": {
                 "append": {
                     "type": "array",
-                    "description": "Array of strings to append to the built beacon executable. Each string is written as a separate append block with build-specific magic.",
+                    "description": "Array of strings to append to the built beacon executable",
                     "items": {
                         "type": "string",
                         "maxLength": 65535
@@ -437,11 +867,11 @@
         },
         "in_memory_append": {
             "type": "object",
-            "description": "In-memory append configuration (encrypted in config blob, decrypted at beacon startup)",
+            "description": "In-memory append configuration (encrypted in config blob, decrypted at startup)",
             "properties": {
                 "append": {
                     "type": "array",
-                    "description": "Array of strings encrypted in config blob and available in memory after beacon startup. Useful for sensitive IOCs/strings.",
+                    "description": "Array of strings encrypted in config blob",
                     "items": {
                         "type": "string",
                         "maxLength": 65535

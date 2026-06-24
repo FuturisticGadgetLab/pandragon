@@ -48,7 +48,7 @@ void ShutdownDllCache(functionTable* funcTable);
  * @param funcName   Function name to resolve (e.g., "VirtualAlloc")
  * @return Function pointer on success, NULL on failure
  */
-void* ResolveDllFunction(functionTable* funcTable, const char* dllName, const char* funcName);
+[[nodiscard]] void* ResolveDllFunction(functionTable* funcTable, const char* dllName, const char* funcName);
 
 /**
  * @brief Map a clean DLL from KnownDlls section (no child process).
@@ -61,7 +61,7 @@ void* ResolveDllFunction(functionTable* funcTable, const char* dllName, const ch
  * @param dllName     DLL name (e.g., "ntdll", "kernel32", "ws2_32")
  * @return Clean DLL base pointer on success, NULL on failure
  */
-PVOID MapKnownDll(functionTable* funcTable, const char* dllName);
+[[nodiscard]] PVOID MapKnownDll(functionTable* funcTable, const char* dllName);
 
 /**
  * @brief Resolve an API from a KnownDlls-mapped DLL by parsing its export directory.
@@ -70,7 +70,7 @@ PVOID MapKnownDll(functionTable* funcTable, const char* dllName);
  * @param functionName ANSI function name
  * @return Function pointer, or NULL
  */
-void* ResolveFromKnownDll(PVOID dllBase, const char* functionName);
+[[nodiscard]] void* ResolveFromKnownDll(PVOID dllBase, const char* functionName);
 
 /**
  * @brief Unmap a KnownDlls-mapped DLL.

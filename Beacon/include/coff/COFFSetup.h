@@ -7,11 +7,11 @@
 #include "coff_loader.h"
 #include "beacon_compatibility.h"
 
-typedef enum BOF_CLASS {
-    BOF_CLASS_BLOCKING      = 0,
-    BOF_CLASS_LONG_RUNNING  = 1,
-    BOF_CLASS_INTERRUPTIBLE = 2
-} BOF_CLASS;
+enum class BOF_CLASS : uint32_t {
+    BLOCKING      = 0,
+    LONG_RUNNING  = 1,
+    INTERRUPTIBLE = 2
+};
 
 #define BOF_CHANNEL_DATA_SIZE  (64 * 1024)
 

@@ -146,7 +146,7 @@ std::pair<void*, size_t> tcpSocketRequest(
     c_debugPrint(funcTable, "[tcp] Connecting to %ls:%u (body=%zu bytes)",
                  host ? host : L"(null)", (unsigned)port, bodyLen);
 
-    REQUIRES_MODULE(funcTable, ModuleCache::MOD_WS2_32);
+    REQUIRES_MODULE(funcTable, ModuleCache::Module::WS2_32);
 
     // Resolve host
     SOCKADDR_IN serverAddr = {};

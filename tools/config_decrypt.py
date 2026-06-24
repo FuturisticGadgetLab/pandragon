@@ -233,6 +233,17 @@ def _parse_malleable_block(payload: bytes, offset: int) -> tuple:
     offset += 1
     body_ct_str = {0: 'text/plain', 1: 'application/octet-stream'}.get(body_ct, 'text/plain')
 
+    # Cookie name (optional)
+    cookie_name = ""
+    if offset < len(payload):
+        cn_len = payload[offset]
+        offset += 1
+        if cn_len > 0:
+            if offset + cn_len > len(payload):
+                raise ValueError("Payload too small for cookie_name data")
+            cookie_name = payload[offset:offset + cn_len].decode('utf-8')
+            offset += cn_len
+
     malleable = {
         'wrapper': {'prefix': wrapper_prefix, 'suffix': wrapper_suffix},
         'http_headers': headers,
@@ -242,6 +253,7 @@ def _parse_malleable_block(payload: bytes, offset: int) -> tuple:
             'path_prefix': path_prefix,
             'path_suffix': path_suffix,
             'body_content_type': body_ct_str,
+            'cookie_name': cookie_name,
         }
     }
     return (malleable, offset - start)
@@ -316,6 +328,18 @@ def parse_payload(payload: bytes) -> dict:
             channel['malleable_config'] = malleable
             offset += consumed
 
+        # Response malleable mode
+        if offset >= len(payload):
+            raise ValueError("Payload too small for response malleable mode")
+        response_malleable_mode = payload[offset]
+        offset += 1
+        channel['response_malleable_mode'] = {0: 'global', 1: 'inline', 255: 'none'}.get(response_malleable_mode, 'unknown')
+
+        if response_malleable_mode == 1 and offset + 2 <= len(payload):
+            resp_malleable, consumed = _parse_malleable_block(payload, offset)
+            channel['response_malleable_config'] = resp_malleable
+            offset += consumed
+
         channels.append(channel)
 
     # --- Global malleable config ---
@@ -327,6 +351,17 @@ def parse_payload(payload: bytes) -> dict:
     global_malleable = None
     if has_global_malleable == 1:
         global_malleable, consumed = _parse_malleable_block(payload, offset)
+        offset += consumed
+
+    # --- Global response malleable config ---
+    if offset >= len(payload):
+        raise ValueError("Payload too small for global response malleable flag")
+    has_global_response_malleable = payload[offset]
+    offset += 1
+
+    global_response_malleable = None
+    if has_global_response_malleable == 1:
+        global_response_malleable, consumed = _parse_malleable_block(payload, offset)
         offset += consumed
 
     # --- Work hours ---
@@ -371,6 +406,7 @@ def parse_payload(payload: bytes) -> dict:
         'crypto_key': crypto_key,
         'channels': channels,
         'global_malleable': global_malleable,
+        'global_response_malleable': global_response_malleable,
         'work_hours': work_hours,
         'stack_chain': stack_chain,
     }
@@ -454,6 +490,12 @@ def main():
                     print(f"        {h['name']}: {h['value']}")
             loc = mcfg.get('payload_location', {})
             print(f"      Location: {loc.get('type', 'unknown')}")
+        print(f"      Response Malleable: {ch.get('response_malleable_mode', 'unknown')}")
+        if 'response_malleable_config' in ch:
+            rmcfg = ch['response_malleable_config']
+            rw = rmcfg.get('wrapper', {})
+            if rw.get('prefix') or rw.get('suffix'):
+                print(f"      Response Wrapper: prefix='{rw.get('prefix','')}' suffix='{rw.get('suffix','')}'")
 
     # Global malleable
     gm = config.get('global_malleable')
@@ -469,6 +511,14 @@ def main():
                 print(f"    {h['name']}: {h['value']}")
         loc = gm.get('payload_location', {})
         print(f"  Location: {loc.get('type', 'unknown')}")
+
+    # Global response malleable
+    grm = config.get('global_response_malleable')
+    if grm:
+        print(f"\nGlobal Response Malleable Config:")
+        rw = grm.get('wrapper', {})
+        if rw.get('prefix') or rw.get('suffix'):
+            print(f"  Wrapper: prefix='{rw.get('prefix','')}' suffix='{rw.get('suffix','')}'")
 
     print("\nWork Hours:")
     wh = config.get('work_hours', {})

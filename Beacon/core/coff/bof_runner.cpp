@@ -158,7 +158,7 @@ std::pair<int, int> RunCOFF(
             return std::make_pair(COFF_ERR_ALLOC_FAIL, COFF_ERR_ALLOC_FAIL);
         }
 
-        async_state->bof_class = BOF_CLASS_LONG_RUNNING;
+        async_state->bof_class = BOF_CLASS::LONG_RUNNING;
         async_state->channel_type = type;
         async_state->channel = nullptr;
         async_state->channel_size = 0;
@@ -189,7 +189,7 @@ std::pair<int, int> RunCOFF(
 
     if (__strcmp(functionname, "go") == 0 && task_id != 0) {
         async_bof_state* async_state = AsyncBofManager::instance().find(task_id);
-        if (!async_state || async_state->bof_class != BOF_CLASS_LONG_RUNNING) {
+        if (!async_state || async_state->bof_class != BOF_CLASS::LONG_RUNNING) {
             debugPrint("[RunCOFF] go() called but no async state for task %u", task_id);
             CleanupCOFF(ctx);
             __free(ctx);

