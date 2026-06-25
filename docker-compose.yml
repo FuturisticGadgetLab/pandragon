@@ -1,0 +1,10 @@
+services:
+  teamserver:
+    build:
+      context: ./server
+    ports:
+      - "6767:6767"
+      - "8080:8080"
+    volumes:
+      - ./server:/app
+    restart: unless-stopped

@@ -163,6 +163,55 @@ Operator GUI:
   make run-server         # Starts teamserver; GUI connects via WebSocket
   make run-gui            # Launch GUI (from project root, uses venv)
 
+============================================================================
+                              DOCKER (TEAMSERVER)
+============================================================================
+
+  The teamserver can be deployed via Docker. The beacon and GUI are not
+  containerised — the beacon is a Windows PE and the GUI is a desktop app.
+
+  Prerequisites:
+    - Docker Engine 24+ with Compose V2 plugin
+
+  Usage:
+
+    # 1. Initial setup (if not already done)
+    make keys              # generate known_beacons.json
+    make ssl-cert          # generate SSL cert (already done if you ran make setup)
+
+    # 2. Edit server/config.json to suit your deployment
+    #    (listener addresses, ports, operators, logging, etc.)
+
+    # 3. Build and start the container
+    make docker-build      # docker compose build
+    make docker-run        # docker compose up -d
+
+    # 4. Create an operator account
+    docker compose exec teamserver python run.py create <username>
+
+    # 5. View logs
+    make docker-logs       # docker compose logs -f
+
+    # Stop the container
+    make docker-stop       # docker compose down
+
+  How it works:
+    - The image is built from server/Dockerfile on python:3.11-slim
+    - The server/ directory is bind-mounted to /app inside the container
+    - Config, SSL certs, and known_beacons.json are edited on the host
+      and reflected in the container immediately (no rebuild needed)
+    - Cython extensions are recompiled automatically on first start if
+      the mounted directory does not contain the compiled .so files
+    - Runtime data (sessions, downloads, logs) persists in server/ on
+      the host
+
+  Ports (default config):
+    6767/tcp  — Operator HTTPS (WebSocket + beacon routes)
+    8080/tcp  — Beacon HTTP
+    6868/tcp  — Beacon TCP (localhost only by default)
+
+  Docker Compose config: docker-compose.yml
+
 Quick-start cheat sheet (copy-paste from project root):
   # 1. Install system deps (Debian/Ubuntu)
   sudo apt install clang mingw-w64 lld openssl python3-venv

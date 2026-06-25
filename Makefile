@@ -134,6 +134,24 @@ server:
 gui:
 	$(MAKE) -C gui build
 
+# ── Docker ─────────────────────────────────────────────────────────
+
+docker-build:
+	docker compose build
+
+docker-run:
+	docker compose up -d
+
+docker-stop:
+	docker compose down
+
+docker-logs:
+	docker compose logs -f
+
+docker-restart: docker-stop docker-run
+
+# ── Server (local) ─────────────────────────────────────────────────
+
 run-server:
 	$(MAKE) -C server run
 
