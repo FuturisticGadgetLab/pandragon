@@ -468,10 +468,12 @@
             "type": "object",
             "properties": {
                 "sandbox_evasion": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Enable sandbox evasion checks at startup"
                 },
                 "debug_mode": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "description": "Enable verbose debug logging in beacon"
                 },
                 "bypass_etw": {
                     "type": "boolean",

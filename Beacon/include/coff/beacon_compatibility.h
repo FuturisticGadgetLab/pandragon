@@ -2,8 +2,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <stdbool.h>
 #include <windows.h>
+
 
 /* Internal function entry structure */
 struct InternalFunctionEntry {
@@ -48,12 +48,12 @@ typedef enum CHANNEL_SIGNAL {
 
 /* BOF Channel structure (full definition for C BOF access) */
 typedef struct bof_channel {
-    volatile LONG  bof_writing;
-    volatile LONG  beacon_writing;
-    volatile LONG  data_valid;
-    volatile LONG  data_acked;
-    volatile LONG  signal;
-    volatile LONG  signal_ack;
+    volatile long  bof_writing; // here we use long instead of LONG to avoid including windows.h BUT this could be an issue eventually
+    volatile long  beacon_writing;
+    volatile long  data_valid;
+    volatile long  data_acked;
+    volatile long  signal;
+    volatile long  signal_ack;
     uint32_t      record_type;
     uint32_t      record_length;
     uint8_t       data[];
@@ -102,14 +102,25 @@ void    BeaconFormatInt(formatp * format, int value);
 void   BeaconPrintf(int type, char * fmt, ...);
 void   BeaconOutput(int type, char * data, int len);
 
+#ifndef __cplusplus // _bool is native to c++ on g++
+    #define bool\t_Bool
+        #if defined __STDC_VERSION__ && __STDC_VERSION__ > 201710L
+            #define true\t((_Bool)+1u)
+            #define false\t((_Bool)+0u)
+    #else
+        #define true\t1
+        #define false\t0
+    #endif
+#endif
+
 /* Token Functions */
-BOOL   BeaconUseToken(HANDLE token);
+bool   BeaconUseToken(HANDLE token);
 void   BeaconRevertToken();
-BOOL   BeaconIsAdmin();
+bool   BeaconIsAdmin();
 
 /* Spawn+Inject Functions */
 void   BeaconGetSpawnTo(bool x86, char * buffer, int length);
-BOOL   BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFOW * sInfo, PROCESS_INFORMATION * pInfo);
+// bool   BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFOW * sInfo, PROCESS_INFORMATION * pInfo);
 void   BeaconInjectProcess(HANDLE hProc, int pid, char * payload, int p_len, int p_offset, char * arg, int a_len);
 void   BeaconInjectTemporaryProcess(PROCESS_INFORMATION * pInfo, char * payload, int p_len, int p_offset, char * arg, int a_len);
 void   BeaconCleanupProcess(PROCESS_INFORMATION * pInfo);
