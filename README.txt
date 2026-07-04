@@ -65,12 +65,20 @@ license from the authors.
   This framework is intended exclusively for:
   - Authorized penetration testing with written permission from the target
     system owner(s)
-  - Academic research and cybersecurity education in controlled environments
   - Personal security research on systems you own or have explicit permission
     to test
-
-  Use of this tool against any system without prior written authorization
-is illegal and unethical. The authors disclaim all liability for misuse.
+  - Academic research and cybersecurity education strictly within dedicated, isolated
+laboratory networks (air-gapped or VLAN-segmented) where the user owns all target
+systems or has explicit, written authorization from the sole network owner.
+  Use in production environments, public networks, or live targets without written
+authorization is strictly forbidden.
+  The authors disclaim all liability for misuse.
+  This software is provided solely for use within jurisdictions where penetration
+    testing without prior authorization is strictly illegal without a license.
+    The authors explicitly prohibit the use of this software in any jurisdiction where
+    the user does not hold a valid, government-issued penetration testing license or
+    explicit court-authorization. By using this software, you accept full criminal
+    and civil liability.
 
   Do no evil.
 
