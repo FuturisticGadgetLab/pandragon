@@ -753,32 +753,6 @@ bool parseConfig(functionTable* functionTable, const uint8_t* blob, size_t blob_
 
         // --- Read global submit response malleable ---
         parseGlobalMalleable("submit_response", &config->global_submit_response_malleable, &config->has_submit_response_malleable_config);
-            } else {
-                c_debugPrint(functionTable, "[parseConfig] No global malleable (has_global=0x%02x)", (unsigned)has_global);
-            }
-        }
-
-        // --- Read has_global_response_malleable ---
-        config->has_response_malleable_config = false;
-        __memset(&config->global_response_malleable, 0, sizeof(PCFG_ChannelMalleable));
-
-        if (offset + 1 <= payload_len) {
-            uint8_t has_global_resp = decrypted[offset++];
-            if (has_global_resp == true) {
-                c_debugPrint(functionTable, "[parseConfig] Found global response malleable block, parsing...");
-                size_t consumed = parseMalleableBlock(decrypted + offset, payload_len - offset,
-                    &config->global_response_malleable);
-                if (consumed == 0) {
-                    c_debugPrint(functionTable, "[parseConfig] Failed to parse global response malleable block");
-                } else {
-                    config->has_response_malleable_config = true;
-                    offset += consumed;
-                    c_debugPrint(functionTable, "[parseConfig] Global response malleable parsed");
-                }
-            } else {
-                c_debugPrint(functionTable, "[parseConfig] No global response malleable (has_global_resp=0x%02x)", (unsigned)has_global_resp);
-            }
-        }
 
         // --- Read Work Hours (6 bytes) ---
         if (offset + 6 <= payload_len) {

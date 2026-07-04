@@ -35,16 +35,18 @@ CXXFLAGS = -target $(TARGET) -nostdlib -nostartfiles -Oz -std=c++20 \
            -I$(OUTPUT_DIR)/.. -I. -Iinclude -IBeacon/include \
            -DBUILD_TIME_RANDOM_SEED=$(BUILD_SEED)
 
-ifneq ($(USE_ALBEDO),1)
+_ALBEDO := $(or $(filter 1,$(ALBEDO)),$(filter 1,$(USE_ALBEDO)))
+ifneq ($(_ALBEDO),1)
     CXX = clang++
 else
     CXX = albedo-clang
     CXXFLAGS := $(filter-out -flto=full, $(CXXFLAGS))
-    ALBEDO := albedo
+    override ALBEDO := albedo
     export ALBEDO
     export ALBEDO_PRESET = offensive-prod
     export ALBEDO_PREOPT = Oz
-    export ALBEDO_REAL_CC = clang++
+    ALBEDO_REAL_CC ?= $(CXX:albedo-clang=clang++-18)
+    export ALBEDO_REAL_CC
 endif
 
 LDFLAGS = -fuse-ld=lld \

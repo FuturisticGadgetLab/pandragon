@@ -521,16 +521,6 @@ BeaconError NetworkManager::sendResponse(uint8_t opcode, const uint8_t* data, si
     return BeaconError::SUCCESS;
 }
 
-BeaconError NetworkManager::sendFileContent(const wchar_t* path, const uint8_t* data,
-                                             uint32_t size, uint8_t status) {
-    if (!m_initialized) {
-        return BeaconError::NOT_INITIALIZED;
-    }
-
-    pandragon::sendFileContent(path, data, size, status);
-    return BeaconError::SUCCESS;
-}
-
 BeaconError NetworkManager::sendFileChunkData(uint32_t chunk_index, uint32_t offset,
                                                uint32_t bytes_read, uint8_t status,
                                                const uint8_t* data) {
@@ -567,15 +557,6 @@ BeaconError NetworkManager::sendKeyRotateAck(uint8_t status) {
     }
 
     pandragon::sendKeyRotateAck(status);
-    return BeaconError::SUCCESS;
-}
-
-BeaconError NetworkManager::sendFileWriteResult(uint8_t status) {
-    if (!m_initialized) {
-        return BeaconError::NOT_INITIALIZED;
-    }
-
-    pandragon::sendFileWriteResult(status);
     return BeaconError::SUCCESS;
 }
 
@@ -618,8 +599,6 @@ void CommandDispatcher::initializeBuiltInHandlers() {
     registerHandler(0x10, handleBofExec);
     registerHandler(0x11, handleBofFree);
     registerHandler(0x14, handleLongRunningBof);
-    registerHandler(0x12, handleFileDownload);
-    registerHandler(0x13, handleFileUpload);
     registerHandler(0x1E, handleRotateKey);
     registerHandler(0x20, handleFileDownloadStart);
     registerHandler(0x21, handleFileDownloadChunk);

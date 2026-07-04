@@ -146,7 +146,7 @@
       "type": "body"
     }
   },
-  "sleep_obfuscation": "morpheus",
+  "sleep_obfuscation": "ekko",
   "sleep_wipe_pe_headers": true,
   "sleep_stack_spoof": true,
   "num_spoof_frames": 6,

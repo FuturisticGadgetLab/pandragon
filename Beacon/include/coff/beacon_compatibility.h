@@ -1,7 +1,5 @@
 #pragma once
 
-#include <stddef.h>
-#include <stdint.h>
 #include <windows.h>
 
 
@@ -17,9 +15,6 @@ extern struct InternalFunctionEntry InternalFunctions[32];
 /* Sleep state constants (C-compatible) */
 #define MASK_STATE_AWAKE    0
 #define MASK_STATE_SLEEPING 1
-
-/* BOF Channel Types (for C compatibility) */
-#define BOF_CHANNEL_DATA_SIZE  (64 * 1024)
 
 typedef enum CHANNEL_TYPE {
     CHANNEL_TYPE_NONE         = 0,
@@ -120,7 +115,7 @@ bool   BeaconIsAdmin();
 
 /* Spawn+Inject Functions */
 void   BeaconGetSpawnTo(bool x86, char * buffer, int length);
-// bool   BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFOW * sInfo, PROCESS_INFORMATION * pInfo);
+bool   BeaconSpawnTemporaryProcess(bool x86, bool ignoreToken, STARTUPINFOW * sInfo, PROCESS_INFORMATION * pInfo);
 void   BeaconInjectProcess(HANDLE hProc, int pid, char * payload, int p_len, int p_offset, char * arg, int a_len);
 void   BeaconInjectTemporaryProcess(PROCESS_INFORMATION * pInfo, char * payload, int p_len, int p_offset, char * arg, int a_len);
 void   BeaconCleanupProcess(PROCESS_INFORMATION * pInfo);

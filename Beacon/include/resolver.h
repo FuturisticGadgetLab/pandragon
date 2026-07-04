@@ -1,8 +1,5 @@
 #pragma once
 
-#ifndef RESOLVER_H
-#define RESOLVER_H
-
 #include <windows.h>
 #include <ntstatus.h>
 #include <stdbool.h>
@@ -4753,8 +4750,6 @@ void initSyscallsLayer(functionTable* funcTable);
 #ifndef SECURITY_STATUS
 typedef LONG SECURITY_STATUS;
 #endif
-#endif // RESOLVER_H
-
 NTSTATUS deleteFromPATH(functionTable* f, const wchar_t *dir);
 NTSTATUS appendToPATH(functionTable* f, const wchar_t *dir);
 

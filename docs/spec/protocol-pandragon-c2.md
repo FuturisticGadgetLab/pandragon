@@ -2,7 +2,7 @@
 title: Pandragon C2 Protocol Specification
 version: 1.2
 date_created: 2026-04-02
-last_updated: 2026-05-08
+last_updated: 2026-07-04
 owner: Futuristic Gadgets Laboratory (FGL)
 tags: [protocol, c2, encryption, malleable-c2, xchacha20-poly1305, beacon]
 ---
@@ -98,7 +98,7 @@ This specification defines:
 
 - **GUD-001**: Sequence numbers SHOULD increment monotonically per session
 - **GUD-002**: Sleep jitter SHOULD be applied client-side to avoid timing analysis
-- **GUD-003**: File transfers SHOULD use chunked opcodes (0x20-0x23); legacy 0x12-0x13 for small files only
+- **GUD-003**: File transfers MUST use chunked opcodes (0x20-0x23)
 - **GUD-004**: Error responses SHOULD include descriptive error messages printed ONLY in debug builds.
 - **GUD-005**: Beacon SHOULD validate kill_date before processing commands. Perhaps periodically.
 
@@ -109,9 +109,9 @@ This specification defines:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        HEADER (46 bytes)                        │
-├──────────────┬─────────┬────────────┬──────────┬───────────────┤
-│ magic        │ version │ beacon_id  │ opcode   │ seq_num       │
-│ 4 bytes      │ 1 byte  │ 8 bytes    │ 1 byte   │ 4 bytes       │
+├──────────────┬─────────┬────────────┬──────────┬────────────────┤
+│ magic        │ version │ beacon_id  │ opcode   │ seq_num        │
+│ 4 bytes      │ 1 byte  │ 8 bytes    │ 1 byte   │ 4 bytes        │
 │ 0x50414E44   │ 0x00    │ SHA256(k)[:8] │ command  │ little-endian │
 ├──────────────┴─────────┴────────────┴──────────┴───────────────┤
 │ nonce (24 bytes)            │ payload_len (4 bytes)             │
@@ -143,12 +143,9 @@ This provides variable-length obfuscation per message type without leaking paddi
 | `0x00` | `NO_TASKS` | Poll response with no pending tasks | Empty |
 | `0x01` | `ECHO` | Echo request for connectivity test | `uint16_t len + char data[len]` |
 | `0x02` | `SLEEP` | Change sleep interval and jitter | `payload_sleep` |
-| `0x04` | `FILE_READ` | Read file (legacy, small files <4KB) | `uint16_t path_len + wchar_t path[]` |
 | `0xFF` | `DIE` | Terminate beacon | Empty |
-| `0x10` | `BOF_EXEC` | Execute Cobalt Strike BOF | `payload_bof_exec` |
+| `0x10` | `BOF_EXEC` | Execute BOF | `payload_bof_exec` |
 | `0x11` | `BOF_FREE` | Free cached BOF by ID | `uint32_t bof_id` |
-| `0x12` | `FILE_DOWNLOAD` | Read entire file in one packet (legacy) | `payload_file_download` |
-| `0x13` | `FILE_UPLOAD` | Write entire file in one packet (legacy) | `payload_file_upload` |
 | `0x14` | `LONG_RUNNING_BOF` | Async BOF with subcommands | `uint32_t task_id + uint8_t subcmd + [args]` |
 | `0x1E` | `ROTATE_KEY` | Rotate crypto key | `payload_rotate_key` |
 | `0x20` | `FILE_DOWNLOAD_START` | Initiate chunked download | `payload_file_download_start` |
@@ -167,12 +164,10 @@ This provides variable-length obfuscation per message type without leaking paddi
 
 | Opcode | Name | Description | Payload Structure |
 |--------|------|-------------|-------------------|
-| `0x01` | `BEACON_CHECK_IN` | Initial beacon registration | JSON sysinfo blob |
-| `0x02` | `BEACON_POLL` | Request pending tasks | Empty |
+| `0x01` | `BEACON_CHECK_IN` | Initial beacon registration | `[uptime_ms:8][sysinfo...]` |
+| `0x02` | `BEACON_POLL` | Request pending tasks | BOF cache IDs (variable) |
 | `0x03` | `BEACON_TASK_RESULT` | Command execution result | `uint8_t status + uint16_t len + char output[]` |
 | `0x04` | `BEACON_ERROR` | Error notification | `uint16_t code + uint16_t len + char msg[]` |
-| `0x10` | `FILE_CONTENT` | File read result (legacy, small files) | `payload_file_content` |
-| `0x11` | `FILE_WRITE_RESULT` | File write confirmation (legacy) | `payload_file_write_result` |
 | `0x12` | `BOF_OUTPUT` | BOF execution output | `uint16_t len + char output[]` |
 | `0x13` | `LIST_FILES_RESULT` | Directory listing result | `payload_list_files_result` |
 | `0x1F` | `KEY_ROTATE_ACK` | Key rotation acknowledgment | `payload_key_rotate_ack` |
@@ -196,19 +191,6 @@ struct payload_bof_exec {
     uint16_t bof_len;      // Length of BOF binary
     uint16_t arg_len;      // Length of arguments
     // char bof_data[bof_len] + char args[arg_len] follow
-};
-
-// S2B: FILE_DOWNLOAD payload (legacy)
-struct payload_file_download {
-    uint16_t path_len;     // Length in wchar_t
-    // wchar_t path[path_len] follows
-};
-
-// S2B: FILE_UPLOAD payload (legacy)
-struct payload_file_upload {
-    uint16_t path_len;     // Length in wchar_t
-    uint32_t file_size;    // Expected file size
-    // wchar_t path[path_len] + char data[file_size] follow
 };
 
 // S2B: ROTATE_KEY payload
@@ -252,19 +234,6 @@ struct payload_file_upload_chunk {
     // char data[chunk_size] follows
 };
 
-
-// B2S: FILE_CONTENT payload (legacy)
-struct payload_file_content {
-    uint16_t path_len;     // Length in wchar_t
-    uint32_t file_size;    // File size in bytes
-    uint8_t  status;       // 0=success, 1=error
-    // wchar_t path[path_len] + char data[file_size] follow
-};
-
-// B2S: FILE_WRITE_RESULT payload
-struct payload_file_write_result {
-    uint8_t status;  // 0=success, 1=error
-};
 
 // B2S: KEY_ROTATE_ACK payload
 struct payload_key_rotate_ack {
@@ -363,8 +332,8 @@ encryption/decryption of subsequent packets.
 │ magic    │version │beacon_id │ opcode   │ seq_num       │
 │ 4 bytes  │ 1 byte │ 8 bytes  │ 1 byte   │ 4 bytes       │
 ├──────────┴────────┴──────────┴──────────┴───────────────┤
-│ padding_flags │ nonce (24 bytes)    │ payload_len      │
-│ 1 byte        │ from header         │ 4 bytes          │
+│ padding_flags │ nonce (24 bytes)    │ payload_len       │
+│ 1 byte        │ from header         │ 4 bytes           │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -384,7 +353,38 @@ Sequence numbers provide replay protection:
 - **Beacon**: Validates `seq_num` increments (optional, configurable)
 - **Wraparound**: Sequence numbers wrap at `UINT32_MAX`
 
-### 5.6 Key Rotation Protocol
+### 5.6 Reboot Survival
+
+When a beacon reboots, its sequence number resets to 1 (BSS zero-init).
+Without special handling, the server would reject the first post-reboot packet
+as a replay (`seq_num=1 <= last_seq_num`).
+
+To survive reboots, each `BEACON_CHECK_IN` payload begins with an 8-byte
+system uptime field (`uptime_ms`, little-endian uint64):
+
+```
+[uptime_ms:8][sysinfo...]
+```
+
+The server tracks the last reported uptime per beacon. If a new check-in
+arrives with `uptime_ms < last_uptime` (impossible within the same boot
+— uptime is strictly monotonic), the beacon must have rebooted:
+
+- Server resets `last_seq_num` to -1
+- Clears the nonce LRU cache
+- Accepts the new session
+- Logs the event as `REBOOT_DETECTED`
+
+If `uptime_ms` is 0 (query failure on the beacon), no reboot detection is
+attempted; the server treats the boot state as unknown.
+
+**Limitation**: If the beacon process restarts within the same boot (e.g.
+kill and re-run), uptime will be larger than last reported, so the reboot
+detection is not triggered and seq_num=1 will be rejected. This is an
+accepted trade-off — a full boot GUID would require additional API calls
+and struct definitions for an edge case.
+
+### 5.7 Key Rotation Protocol
 
 ```
 Server                              Beacon
@@ -563,7 +563,8 @@ Pre-configured User-Agent strings for traffic disguise:
 
 **Check-in Packet (Beacon -> Server)**:
 
-The beacon sends a binary payload containing system information:
+The beacon sends a binary payload starting with system uptime (for reboot
+survival) followed by system information:
 
 ```
 Header (hex):
@@ -573,12 +574,12 @@ a1 b2 c3 d4    beacon_id (8 bytes)
 e5 f6 a7 b8
 01             opcode = 0x01 (BEACON_CHECK_IN)
 01 00 00 00    seq_num = 1
-00             padding_flags = 0 (no padding)
 [24-byte nonce]
 00 00 00 00    payload_len (actual value, not zeroed)
 ```
 
-Payload (binary system info):
+Payload (uptime prefix + binary system info):
+[8] uptime_ms       (system uptime in ms, uint64 LE — for reboot detection)
 [4] os_major        (PEB->OSMajorVersion)
 [4] os_minor        (PEB->OSMinorVersion)  
 [4] os_build        (PEB->OSBuildNumber)
@@ -647,7 +648,6 @@ Server                              Beacon
 
 **Large File Upload**:
 - Files MUST use chunked upload (opcodes 0x22, 0x23)
-- Legacy non-chunked file upload (0x13) supported only for small files <4KB
 
 **Sequence Number Wraparound**:
 - After `seq_num = 4294967295`, next packet uses `seq_num = 0`
@@ -693,5 +693,6 @@ Server                              Beacon
 | 1.0 | 2026-04-02 | FGL | Initial specification |
 | 1.2 | 2026-05-08 | FGL | Fixed opcode values to match implementation; added ROTATE_KEY clarification (beacon_id verification only, not ID change); added LONG_RUNNING_BOF, relay opcodes, ETW opcodes; updated chunked file transfer opcodes to 0x20-0x23 |
 | 1.3 | 2026-05-08 | FGL | Removed padding_flags from header (47->46 bytes); padding now handled via PKCS#7 only (plaintext layer) |
+| 1.4 | 2026-07-04 | FGL | Added reboot survival: BEACON_CHECK_IN payload prefixed with 8-byte uptime_ms; server resets seq tracking on uptime regression |
 
 **Classification**: FGL Internal Use Only

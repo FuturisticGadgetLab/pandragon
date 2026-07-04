@@ -23,13 +23,10 @@ namespace pandragon {
             case s2b_opcode::NO_TASKS:
             case s2b_opcode::ECHO:
             case s2b_opcode::SLEEP:
-            case s2b_opcode::FILE_READ:
             case s2b_opcode::DIE:
             case s2b_opcode::BOF_EXEC:
             case s2b_opcode::BOF_FREE:
             case s2b_opcode::LONG_RUNNING_BOF:
-            case s2b_opcode::FILE_DOWNLOAD:
-            case s2b_opcode::FILE_UPLOAD:
             // Key rotation opcode
             case s2b_opcode::ROTATE_KEY:
                 return true;
@@ -57,8 +54,6 @@ namespace pandragon {
             case b2s_opcode::BEACON_POLL:
             case b2s_opcode::BEACON_TASK_RESULT:
             case b2s_opcode::BEACON_ERROR:
-            case b2s_opcode::FILE_CONTENT:
-            case b2s_opcode::FILE_WRITE_RESULT:
             case b2s_opcode::BOF_OUTPUT:
             case b2s_opcode::LIST_FILES_RESULT:
             // Key rotation acknowledgment

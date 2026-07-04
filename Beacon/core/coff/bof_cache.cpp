@@ -13,8 +13,6 @@
 #include "../../include/utils.h"
 #include "../../include/coff/coff_loader.h"
 
-#define MAX_CACHED_BOFS 8
-
 BofCacheManager& BofCacheManager::instance() {
     static BofCacheManager s_instance;
     return s_instance;

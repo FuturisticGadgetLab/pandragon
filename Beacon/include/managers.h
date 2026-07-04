@@ -316,12 +316,6 @@ public:
     // =========================================================================
 
     /**
-     * @brief Send file content (legacy single-packet download)
-     */
-    [[nodiscard]] BeaconError sendFileContent(const wchar_t* path, const uint8_t* data, 
-                                 uint32_t size, uint8_t status);
-
-    /**
      * @brief Send file chunk data
      */
     [[nodiscard]] BeaconError sendFileChunkData(uint32_t chunk_index, uint32_t offset, 
@@ -347,11 +341,6 @@ public:
      * @brief Send key rotation acknowledgment
      */
     [[nodiscard]] BeaconError sendKeyRotateAck(uint8_t status);
-
-    /**
-     * @brief Send file write result
-     */
-    [[nodiscard]] BeaconError sendFileWriteResult(uint8_t status);
 
 private:
     bool              m_initialized;

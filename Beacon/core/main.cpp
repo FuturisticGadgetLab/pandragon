@@ -158,8 +158,8 @@ static bool initNetworkFromConfig(PandragonRuntime& runtime) {
 
     // Check-in moved to main loop (supports lazy check-in deferral)
 
-    g_debugPrint("[+] Using config: %s:%d%s",
-                 ch->host, ch->port, ch->path);
+    g_debugPrint("[+] Using config: %s:%d poll=%s submit=%s",
+                 ch->host, ch->port, ch->poll_path, ch->submit_path);
 
     return true;
 }
@@ -365,8 +365,8 @@ static void handleChannelFailover(PandragonRuntime& runtime, LoopState& ls) {
             __fastfail(7);
         }
 
-        g_debugPrint("Failing over to channel %u: %s:%d%s",
-                     (unsigned)ls.active_channel, new_ch->host, new_ch->port, new_ch->path);
+        g_debugPrint("Failing over to channel %u: %s:%d poll=%s submit=%s",
+                     (unsigned)ls.active_channel, new_ch->host, new_ch->port, new_ch->poll_path, new_ch->submit_path);
 
         // Use setActiveChannel: handles host/ua/path + malleable resolution
         runtime.getNetworkManager().setActiveChannel(ls.active_channel, *ls.config);

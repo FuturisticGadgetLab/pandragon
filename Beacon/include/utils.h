@@ -35,9 +35,7 @@ typedef size_t SIZE_T;
 #define UINT32_MAX 0xffffffffU  /* 4294967295U */
 #define UINT64_MAX 0xffffffffffffffffULL /* 18446744073709551615ULL */
 
-#define operationSuccess 1
-#define operationFailure 0
-#define freeNtMemory(funcTable, region) if(region) { funcTable->NtFreeVirtualMemory(NtCurrentProcess(), &region, NULL, MEM_RELEASE); }
+
 
 /*
     Due to issues with gcc warnings:
@@ -55,22 +53,21 @@ extern "C" {
 uint64_t ___rdtsc(void);
 
 size_t __wcslen(const wchar_t *str);
+const wchar_t* __wcschr(const wchar_t* str, wchar_t ch);
 char* __strtok(char* str, const char* delim);
-wchar_t* __wcstok(wchar_t* str, const wchar_t* delim);
-int64_t __strtoll(const char* str, char** endptr, int base) ;
+
 
 int __atoi(const char *str);
 int __wtoi(const wchar_t *str);
 void* memcpy(void* dest, const void* src, size_t n);
 void* __memcpy(void* dest, const void* src, size_t n);
-void* __wmemcpy(void* dest, const void* src, size_t n);
 
-wchar_t* __wcscat(wchar_t* dest, const wchar_t* src);
-wchar_t* __wcscpy(wchar_t* dest, const wchar_t* src);
+
+
 
 void* __memset(void* dest, int value, size_t n);
 int   __memcmp(const void *ptr1, const void *ptr2, size_t num);
-void* __memmove(void* dest, const void* src, size_t n);
+
 
 int __snprintf(char *buffer, size_t size, const char *format, ...);
 size_t __strlen(const char *str);
@@ -78,49 +75,33 @@ size_t __strlen(const char *str);
 int __strcmp(const char *str1, const char *str2);
 int __stricmp(const char *s1, const char *s2);
 int __strncmp(const char *s1, const char *s2, size_t n);
-int __strnicmp(const char *s1, const char *s2, size_t n);
 
-unsigned long __strtoul(const char *nptr, char **endptr, int base);
 
-unsigned long long __strtoull(const char *nptr, char **endptr, int base);
 
-unsigned long long __strtoumax(const char *nptr, char **endptr, int base);
-long long __strtoimax(const char *nptr, char **endptr, int base);
 
 int __wcsnicmp(const wchar_t *str1, const wchar_t *str2, size_t count);
 int __wcsncmp(const wchar_t *str1, const wchar_t *str2, size_t count);
 wchar_t* __wcsstr(const wchar_t* haystack, const wchar_t* needle);
 int __wcscmp(const wchar_t *s1, const wchar_t *s2);
-wchar_t* __wcsncpy(wchar_t* dest, const wchar_t* src, size_t n);
+
 
 char *__strchr(const char *s, int c);
 char *__strncpy(char *dest, const char *src, size_t n);
-char* __strcpy(char *dest, const char *src);
-char* __strstr(const char *haystack, const char *needle);
-char* __strrchr(const char* str, int c);
-char* __strcat(char* dest, const char* src);
-char* __strncat(char* dest, const char* src, size_t n);
+
 
 // Macro expansion (malleable C2)
 char* expandMacros(const char* input);
 
-int __isalnum(char c);
-int __iswalnum(wchar_t c);
+
 
 int __wcsicmp(const wchar_t* a, const wchar_t* b);
 
-wchar_t __wtolower(wchar_t ch);
-void __tolower(char *str);
-char __tolower_char(char ch);
+
 
 void urlEncode(const char* input, char* output, size_t outputSize);
-int __isxdigit(int c);
 size_t __wcstombs(char *mbstr, const wchar_t *wcstr, size_t maxlen);
-int __isalphanum(int c);
 size_t __mbstowcs(wchar_t *wcstr, const char *mbstr, size_t max);
-int __sprintf(char* dest, const char* format, ...);
 
-bool __starts_with(const char* string, const char* substring);
 int __vsprintf(char* buf, const char* fmt, va_list args);
 int __vsnprintf(char *buf, size_t limit, const char *fmt, va_list args);
 
@@ -128,9 +109,7 @@ void* __calloc(SIZE_T num, SIZE_T size);
 [[nodiscard]] void* __malloc(SIZE_T size);
 void  __free(void* ptr);
 uint16_t __htons(uint16_t v);
-uint16_t __ntohs(uint16_t v);
-uint32_t __htonl(uint32_t v);
-uint32_t __ntohl(uint32_t v);
+
 
 bool is_avx_supported(void);
 
@@ -199,7 +178,7 @@ statements [??]. It does not seem to work on Wine and I am out of ideas on how t
     #define c_VERBOSE(t, fmt, ...) ;
 #endif
 
-#define dbgPrint debugPrint
+
 
 #ifdef __cplusplus
 }
@@ -216,9 +195,6 @@ void __stack_chk_fail() __attribute__((noreturn));
 extern "C" void ___chkstk_ms(void);
 extern "C" void __chkstk(void);
 
-void enterLock(std::atomic_flag target);
-void leaveLock(std::atomic_flag target);
-// honestly these shouldnt even exist. TODO, remove...
 void safeWcsCopyBounded(wchar_t* dst, const wchar_t* src, size_t max_len);
 void safeStrCopyBounded(char* dst, const char* src, size_t max_len);
 void safeBoundedCopy(char* dst, const uint8_t* src, uint8_t src_len, size_t max_len);

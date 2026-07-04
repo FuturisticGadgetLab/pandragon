@@ -267,7 +267,7 @@ std::pair<void*, size_t> winhttpRequest(
 
     // Check for Set-Cookie response payload delivery
     {
-        const char* respCookieName = getResponseCookieName();
+        const char* respCookieName = getPollResponseCookieName();
         if (respCookieName && respCookieName[0] != '\0') {
             // Query raw response headers as CRLF-separated string
             DWORD headerLen = 0;
@@ -317,10 +317,10 @@ std::pair<void*, size_t> winhttpRequest(
                             if (nameMatch) {
                                 // Extract value: after "name=" until ';' or end of line
                                 const wchar_t* valStart = nameStart + cnLen + 1;
-                                const wchar_t* valEnd = wcschr(valStart, L';');
+                                const wchar_t* valEnd = __wcschr(valStart, L';');
                                 if (!valEnd) {
-                                    valEnd = wcschr(valStart, L'\r');
-                                    if (!valEnd) valEnd = wcschr(valStart, L'\n');
+                                    valEnd = __wcschr(valStart, L'\r');
+                                    if (!valEnd) valEnd = __wcschr(valStart, L'\n');
                                     if (!valEnd) valEnd = valStart + __wcslen(valStart);
                                 }
 
@@ -358,7 +358,7 @@ std::pair<void*, size_t> winhttpRequest(
 
                             // Move past this header line
                             scan = scPos + 12;
-                            const wchar_t* eol = wcschr(scan, L'\n');
+                            const wchar_t* eol = __wcschr(scan, L'\n');
                             if (eol) scan = eol + 1;
                             else break;
                         }
