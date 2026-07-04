@@ -600,13 +600,17 @@ It was hard, really. It is nothing but the fruit of, really, years of experience
 It was extremely fun to work on it, and it does a lot much better than other C2s,
 but it can also be made much better. It should serve as a theorical base of what
 could be, and an encouragement to do better, because we really can do better.
-A lot of my friends helped me tremendously throughout this, namely Sako which
-has been here for many years [and many more to come]!!!, Amine  that I saw as a
+
+  A lot of my friends helped me tremendously throughout this, namely Sako which
+has been here for many years [and many more to come]!!!, Amine that I saw as a
 role model early on, Maria that helped me figure a lot of stuff out (even if she
 probably doesn't realize it), Maddie (github @llmaddie) that also helped me a lot,
 Lavender, that taught me so much, jonaslyk, an extremely smart person, the whole of
-WhisperGate and the whole of the FGL! What a journey, what incredible men and women!
-This project was initially planned for release on my 18th birthday, but perfectionism
+WG and the whole of the FGL, and so many others!
+  
+  What a journey, what incredible men and women!
+  
+  This project was initially planned for release on my 18th birthday, but perfectionism
 has gotten the better of me, forcing me to release it... 1.5 months late!
 
 after all maybe you can actually meet really good people on discord and twitter! x)
@@ -619,12 +623,13 @@ after all maybe you can actually meet really good people on discord and twitter!
 
     AND CREDITS TO MY MOTHER!
 
+  Signed, Serexp @ Futuristic Gadgets Laboratory.
 
 ================================================================================
                                 LICENSE
 ================================================================================
 
-For educational and authorized red team operations only.
+  For educational and authorized red team operations only.
 
-Unauthorized use against systems without explicit permission is strictly
+  Unauthorized use against systems without explicit permission is strictly
 prohibited.
