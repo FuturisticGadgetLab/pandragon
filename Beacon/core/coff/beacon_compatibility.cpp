@@ -622,7 +622,7 @@ bool   toWideChar(char * src, wchar_t * dst, int max)
     return TRUE;
 }
 
-// ── Persistent BOF State API ─────────────────────────────────────────────
+//  Persistent BOF State API 
 #define MAX_PERSISTENT_STATES 16
 
 struct PersistentStateEntry {

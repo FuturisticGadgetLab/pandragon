@@ -3,8 +3,7 @@ title: Pandragon C2 Protocol Specification
 version: 1.2
 date_created: 2026-04-02
 last_updated: 2026-07-04
-owner: Futuristic Gadgets Laboratory (FGL)
-tags: [protocol, c2, encryption, malleable-c2, xchacha20-poly1305, beacon]
+Futuristic Gadgets Laboratory (FGL)
 ---
 
 # Introduction
@@ -694,5 +693,3 @@ Server                              Beacon
 | 1.2 | 2026-05-08 | FGL | Fixed opcode values to match implementation; added ROTATE_KEY clarification (beacon_id verification only, not ID change); added LONG_RUNNING_BOF, relay opcodes, ETW opcodes; updated chunked file transfer opcodes to 0x20-0x23 |
 | 1.3 | 2026-05-08 | FGL | Removed padding_flags from header (47->46 bytes); padding now handled via PKCS#7 only (plaintext layer) |
 | 1.4 | 2026-07-04 | FGL | Added reboot survival: BEACON_CHECK_IN payload prefixed with 8-byte uptime_ms; server resets seq tracking on uptime regression |
-
-**Classification**: FGL Internal Use Only
