@@ -8,7 +8,7 @@
  */
 
 #include <windows.h>
-#include "../Beacon/include/coff/beacon.h"
+#include "../Beacon/include/coff/beacon_compatibility.h"
 
 DECLSPEC_IMPORT LONG NTAPI NTDLL$NtQuerySystemInformation(
     ULONG SystemInformationClass,
@@ -61,6 +61,7 @@ DECLSPEC_IMPORT HANDLE WINAPI kernel32$GetProcessHeap(void);
 /* NT types that may not be defined in winternl.h */
 typedef LONG KPRIORITY;
 
+#ifndef VM_COUNTERS
 typedef struct _VM_COUNTERS {
     SIZE_T PeakVirtualSize;
     SIZE_T VirtualSize;
@@ -74,15 +75,9 @@ typedef struct _VM_COUNTERS {
     SIZE_T PagefileUsage;
     SIZE_T PeakPagefileUsage;
 } VM_COUNTERS, *PVM_COUNTERS;
+#endif
 
-typedef struct _IO_COUNTERS {
-    ULONGLONG ReadOperationCount;
-    ULONGLONG WriteOperationCount;
-    ULONGLONG OtherOperationCount;
-    ULONGLONG ReadTransferCount;
-    ULONGLONG WriteTransferCount;
-    ULONGLONG OtherTransferCount;
-} IO_COUNTERS, *PIO_COUNTERS;
+/* IO_COUNTERS is defined in mingw-w64 winnt.h (via windows.h) */
 
 typedef struct _UNICODE_STRING {
     USHORT Length;

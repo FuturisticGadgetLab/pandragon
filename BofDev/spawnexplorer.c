@@ -1,5 +1,5 @@
 #include <windows.h>
-#include "../Beacon/include/coff/beacon.h"
+#include "../Beacon/include/coff/beacon_compatibility.h"
 
 DECLSPEC_IMPORT BOOL WINAPI kernel32$CreateProcessA(
     LPCSTR                lpApplicationName,

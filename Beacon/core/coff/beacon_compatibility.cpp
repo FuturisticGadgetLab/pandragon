@@ -15,11 +15,9 @@
 
 #include "../../include/coff/beacon_compatibility.h"
 #include "../../include/utils.h"
-#include "../../include/syscalls.h"
 #include "../../include/resolver.h"
 #include "../../include/injection.h"
 #include "../../libs/bastia/bastia.h"
-#include "../../include/coff/COFFSetup.h"
 #include "../../include/pandragon_runtime.h"
 
 #ifdef _WIN64

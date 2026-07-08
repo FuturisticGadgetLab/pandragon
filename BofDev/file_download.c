@@ -1,4 +1,5 @@
 #include <windows.h>
+#include "../Beacon/include/coff/beacon_compatibility.h"
 
 WINBASEAPI HANDLE WINAPI kernel32$CreateFileA(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 WINBASEAPI BOOL   WINAPI kernel32$ReadFile(HANDLE, LPVOID, DWORD, LPDWORD, LPOVERLAPPED);
@@ -9,10 +10,6 @@ WINBASEAPI BOOL   WINAPI kernel32$SetFilePointerEx(HANDLE, LARGE_INTEGER, PLARGE
 WINBASEAPI LPVOID WINAPI kernel32$VirtualAlloc(LPVOID, SIZE_T, DWORD, DWORD);
 WINBASEAPI BOOL   WINAPI kernel32$VirtualFree(LPVOID, SIZE_T, DWORD);
 
-void BeaconPrintf(int type, char* fmt, ...);
-void BeaconOutput(int type, char* data, int len);
-
-#define CALLBACK_OUTPUT  0x0
 #define CHUNK_SIZE (64 * 1024)
 
 void go(char* args, int alen) {
@@ -43,7 +40,7 @@ void go(char* args, int alen) {
         return;
     }
 
-    char* buffer = (char*)kernel32$VirtualAlloc(NULL, chunk_size, MEM_COMMIT, PAGE_READWRITE);
+    char* buffer = (char*)kernel32$VirtualAlloc(NULL, chunk_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!buffer) {
         kernel32$CloseHandle(hFile);
         BeaconPrintf(CALLBACK_OUTPUT, "[!] VirtualAlloc failed\n");

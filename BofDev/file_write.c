@@ -1,22 +1,20 @@
 #include <windows.h>
+#include "../Beacon/include/coff/beacon_compatibility.h"
 
 WINBASEAPI HANDLE WINAPI kernel32$CreateFileA(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
 WINBASEAPI BOOL   WINAPI kernel32$WriteFile(HANDLE, LPCVOID, DWORD, LPDWORD, LPOVERLAPPED);
 WINBASEAPI BOOL   WINAPI kernel32$CloseHandle(HANDLE);
 WINBASEAPI DWORD  WINAPI kernel32$GetLastError(VOID);
 
-void BeaconPrintf(int type, char* fmt, ...);
-void BeaconOutput(int type, char* data, int len);
-
 void go(char* args, int alen) {
     if (!args || alen < 5) {
-        BeaconPrintf(0, "[!] Usage: path_len(4) + path + data\n");
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] Usage: path_len(4) + path + data\n");
         return;
     }
 
     int name_len = *(int*)args;
     if (name_len <= 0 || name_len > 512 || 4 + name_len >= alen) {
-        BeaconPrintf(0, "[!] Invalid path length: %d\n", name_len);
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] Invalid path length: %d\n", name_len);
         return;
     }
 
@@ -32,7 +30,7 @@ void go(char* args, int alen) {
         CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
     if (hFile == INVALID_HANDLE_VALUE) {
-        BeaconPrintf(0, "[!] CreateFileA failed: %lu\n", kernel32$GetLastError());
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] CreateFileA failed: %lu\n", kernel32$GetLastError());
         return;
     }
 
@@ -45,8 +43,8 @@ void go(char* args, int alen) {
     kernel32$CloseHandle(hFile);
 
     if (ok) {
-        BeaconPrintf(0, "[+] Wrote %lu bytes to %s\n", bytesWritten, path);
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] Wrote %lu bytes to %s\n", bytesWritten, path);
     } else {
-        BeaconPrintf(0, "[!] WriteFile failed: %lu\n", kernel32$GetLastError());
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] WriteFile failed: %lu\n", kernel32$GetLastError());
     }
 }

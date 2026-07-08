@@ -11,10 +11,6 @@
       "max_consecutive_failures": 5,
       "backoff_sleep_ms": 10000,
       "poll_malleable_config": {
-        "wrapper": {
-          "prefix": "",
-          "suffix": ""
-        },
         "payload_location": {
           "type": "query_param",
           "param_name": "q",

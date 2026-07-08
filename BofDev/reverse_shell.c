@@ -15,23 +15,23 @@
 
 #include <stdbool.h>
 
- #include "../Beacon/include/coff/beacon.h"
+ #include "../Beacon/include/coff/beacon_compatibility.h"
 
-WINBASEAPI HANDLE WINAPI kernel32$CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
-WINBASEAPI BOOL   WINAPI kernel32$CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBUTES lpPipeAttributes, DWORD nSize);
-WINBASEAPI BOOL   WINAPI kernel32$CreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes, LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags, LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation);
-WINBASEAPI BOOL   WINAPI kernel32$ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped);
-WINBASEAPI BOOL   WINAPI kernel32$WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped);
-WINBASEAPI BOOL   WINAPI kernel32$PeekNamedPipe(HANDLE hNamedPipe, LPVOID lpBuffer, DWORD nBufferSize, LPDWORD lpBytesRead, LPDWORD lpTotalBytesAvail, LPDWORD lpBytesLeftThisMessage);
-WINBASEAPI BOOL   WINAPI kernel32$SetHandleInformation(HANDLE hObject, DWORD dwMask, DWORD dwFlags);
-WINBASEAPI DWORD  WINAPI kernel32$GetLastError(VOID);
-WINBASEAPI VOID   WINAPI kernel32$Sleep(DWORD dwMilliseconds);
-WINBASEAPI BOOL   WINAPI kernel32$CloseHandle(HANDLE hObject);
-WINBASEAPI LPVOID WINAPI kernel32$VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
-WINBASEAPI BOOL   WINAPI kernel32$VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
-WINBASEAPI SIZE_T WINAPI msvcrt$wcslcat(wchar_t *dest, const wchar_t *src, SIZE_T count);
-WINBASEAPI SIZE_T WINAPI msvcrt$wcslen(const wchar_t *str);
-WINBASEAPI VOID * WINAPI msvcrt$memset(void *dest, int c, SIZE_T count);
+HANDLE WINAPI kernel32$CreateFileW(LPCWSTR lpFileName, DWORD dwDesiredAccess, DWORD dwShareMode, LPSECURITY_ATTRIBUTES lpSecurityAttributes, DWORD dwCreationDisposition, DWORD dwFlagsAndAttributes, HANDLE hTemplateFile);
+BOOL   WINAPI kernel32$CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBUTES lpPipeAttributes, DWORD nSize);
+BOOL   WINAPI kernel32$CreateProcessW(LPCWSTR lpApplicationName, LPWSTR lpCommandLine, LPSECURITY_ATTRIBUTES lpProcessAttributes, LPSECURITY_ATTRIBUTES lpThreadAttributes, BOOL bInheritHandles, DWORD dwCreationFlags, LPVOID lpEnvironment, LPCWSTR lpCurrentDirectory, LPSTARTUPINFOW lpStartupInfo, LPPROCESS_INFORMATION lpProcessInformation);
+BOOL   WINAPI kernel32$ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped);
+BOOL   WINAPI kernel32$WriteFile(HANDLE hFile, LPCVOID lpBuffer, DWORD nNumberOfBytesToWrite, LPDWORD lpNumberOfBytesWritten, LPOVERLAPPED lpOverlapped);
+BOOL   WINAPI kernel32$PeekNamedPipe(HANDLE hNamedPipe, LPVOID lpBuffer, DWORD nBufferSize, LPDWORD lpBytesRead, LPDWORD lpTotalBytesAvail, LPDWORD lpBytesLeftThisMessage);
+BOOL   WINAPI kernel32$SetHandleInformation(HANDLE hObject, DWORD dwMask, DWORD dwFlags);
+DWORD  WINAPI kernel32$GetLastError(VOID);
+VOID   WINAPI kernel32$Sleep(DWORD dwMilliseconds);
+BOOL   WINAPI kernel32$CloseHandle(HANDLE hObject);
+LPVOID WINAPI kernel32$VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
+BOOL   WINAPI kernel32$VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
+SIZE_T WINAPI msvcrt$wcslcat(wchar_t *dest, const wchar_t *src, SIZE_T count);
+SIZE_T WINAPI msvcrt$wcslen(const wchar_t *str);
+VOID * WINAPI msvcrt$memset(void *dest, int c, SIZE_T count);
 
 /* Compile-time random pipe name - can eventually be patched by server */
 const wchar_t PIPE_NAME[] = L"\\\\.\\pipe\\pd_7a2f9c4e1b";

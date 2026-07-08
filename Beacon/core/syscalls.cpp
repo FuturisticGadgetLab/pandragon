@@ -696,6 +696,7 @@ bool DeinitHWSyscalls(functionTable* funcTable) {
     return true;
 }
 
+#ifdef DEBUG
 
 bool testSyscalls(void) {
     return testSyscalls(g_functionTable);
@@ -774,7 +775,7 @@ bool testSyscalls(functionTable* funcTable) {
     return SUCCESS;
 }
 
-/* Syscall Wrapper Functions Implementation - Much cleaner API! */
+#endif
 
 NTSTATUS syscallNtClose(HANDLE Handle) {
     pNtClose pNtClose_func = (pNtClose)PrepareSyscall(lcg_encrypt("NtClose"));

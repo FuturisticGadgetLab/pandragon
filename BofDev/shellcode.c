@@ -11,7 +11,7 @@
  */
 
 #include <windows.h>
-#include "../Beacon/include/coff/beacon.h"
+#include "../Beacon/include/coff/beacon_compatibility.h"
 
 DECLSPEC_IMPORT void* WINAPI KERNEL32$VirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, DWORD flProtect);
 DECLSPEC_IMPORT BOOL WINAPI KERNEL32$VirtualFree(LPVOID lpAddress, SIZE_T dwSize, DWORD dwFreeType);
@@ -50,11 +50,10 @@ void go(char* args, unsigned long arglen) {
         return;
     }
 
-    const char* hex_shellcode = ptr;
+    const char* hex_shellcode = args;
     int hex_len = 0;
-    while (ptr < args + arglen && *ptr != '\0') {
+    while (hex_len < arglen && args[hex_len] != '\0') {
         hex_len++;
-        ptr++;
     }
 
     if (hex_len % 2 != 0) {

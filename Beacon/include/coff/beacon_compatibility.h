@@ -1,7 +1,7 @@
 #pragma once
 
 #include <windows.h>
-
+#include <stdint.h>
 
 /* Internal function entry structure */
 struct InternalFunctionEntry {
@@ -54,6 +54,8 @@ typedef struct bof_channel {
     uint8_t       data[];
 } bof_channel;
 
+#define BOF_CHANNEL_DATA_SIZE  (64 * 1024)  /* 64KB channel buffer size */
+
 /* Forward declare BeaconConfig */
 struct BeaconConfig;
 
@@ -98,13 +100,13 @@ void   BeaconPrintf(int type, char * fmt, ...);
 void   BeaconOutput(int type, char * data, int len);
 
 #ifndef __cplusplus // _bool is native to c++ on g++
-    #define bool\t_Bool
+    #define bool _Bool
         #if defined __STDC_VERSION__ && __STDC_VERSION__ > 201710L
-            #define true\t((_Bool)+1u)
-            #define false\t((_Bool)+0u)
+            #define true ((_Bool)+1u)
+            #define false ((_Bool)+0u)
     #else
-        #define true\t1
-        #define false\t0
+        #define true 1
+        #define false 0
     #endif
 #endif
 

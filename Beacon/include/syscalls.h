@@ -18,7 +18,6 @@ extern "C" [[nodiscard]] bool initSyscalls(SYSCALLS_ID ID);
 [[nodiscard]] bool testSyscalls(functionTable* funcTable);
 
 
-/* Syscall Wrapper Functions - Much cleaner API! */
 [[nodiscard]] NTSTATUS syscallNtClose(HANDLE Handle);
 [[nodiscard]] NTSTATUS syscallNtCreateFile(PHANDLE FileHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes, PIO_STATUS_BLOCK IoStatusBlock, PLARGE_INTEGER AllocationSize, ULONG FileAttributes, ULONG ShareAccess, ULONG CreateDisposition, ULONG CreateOptions, PVOID EaBuffer, ULONG EaLength);
 [[nodiscard]] NTSTATUS syscallNtDeleteFile(PCOBJECT_ATTRIBUTES ObjectAttributes);

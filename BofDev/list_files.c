@@ -10,7 +10,7 @@
  * Arguments are sent as raw UTF-8 text from the server.
  */
 
-#include "../Beacon/include/coff/beacon.h"
+#include "../Beacon/include/coff/beacon_compatibility.h"
 
 WINBASEAPI HANDLE WINAPI kernel32$FindFirstFileW(LPCWSTR lpFileName, LPWIN32_FIND_DATAW lpFindFileData);
 WINBASEAPI BOOL   WINAPI kernel32$FindNextFileW(HANDLE hFindFile, LPWIN32_FIND_DATAW lpFindFileData);

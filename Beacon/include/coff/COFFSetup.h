@@ -13,8 +13,6 @@ enum class BOF_CLASS : uint32_t {
     INTERRUPTIBLE = 2
 };
 
-#define BOF_CHANNEL_DATA_SIZE  (64 * 1024)
-
 typedef struct async_bof_thread_ctx {
     void (*bof_entry)(char*, unsigned long);
     char* argumentdata;
