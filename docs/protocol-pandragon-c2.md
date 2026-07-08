@@ -91,7 +91,7 @@ This specification defines:
 - **CON-002**: Plaintext padding MUST use PKCS#7 (1-16 bytes, aligned to 16-byte boundary)
 - **CON-003**: Beacon ID MUST be exactly 8 bytes
 - **CON-004**: Protocol version MUST be 0 (epoch) for all current implementations
-- **CON-005**: Magic bytes MUST be `0x50414E44` ("PAND" in ASCII, little-endian)
+- **CON-005**: Magic bytes MUST be `0x50414E44` (stored little-endian as `44 4E 41 50` → "DNAP")
 
 ### Guidelines
 
@@ -567,7 +567,7 @@ survival) followed by system information:
 
 ```
 Header (hex):
-44 4e 41 50    magic = 0x50414E44 ("PAND")
+44 4e 41 50    magic = 0x50414E44 (hex val "PAND", stored LE → "DNAP")
 00             version = 0
 a1 b2 c3 d4    beacon_id (8 bytes)
 e5 f6 a7 b8

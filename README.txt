@@ -517,7 +517,7 @@ Key options:
   - sleep_ms: Base check-in interval
   - jitter_pct: Random variation (0-100)
   - use_indirect_syscalls: Enable HWBP syscall system
-  - sleep_obfuscation: none, ekko, foliage
+  - sleep_obfuscation: none, ekko, ekko_runtime, morpheus, foliage
   - sleep_stack_spoof: Spoof TEB stack during Ekko sleep
   - stack_spoof_chain: User-supplied return-address chain for sleep stack (module!function pairs)
   - num_spoof_frames: Number of fake frames to write (default 6)

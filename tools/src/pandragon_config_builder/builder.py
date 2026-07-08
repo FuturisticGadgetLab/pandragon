@@ -41,30 +41,36 @@ def derive_beacon_id(crypto_key_hex: str) -> str:
     return hashlib.sha256(crypto_key_bytes).hexdigest()[:16]
 
 
-def validate_config(config: dict, schema_path: str = None) -> bool:
-    """Validate configuration against JSON schema"""
+def validate_config(config: dict, schema_path: str = None) -> list:
+    """Validate configuration against JSON schema.
+
+    Returns a list of error message strings (empty list on success).
+    """
+    errors = []
+
     if 'crypto_key' in config and 'beacon_id' not in config:
         config['beacon_id'] = derive_beacon_id(config['crypto_key'])
         print(f"[*] Auto-derived beacon_id: {config['beacon_id']}")
     elif 'crypto_key' in config and 'beacon_id' in config:
         expected_id = derive_beacon_id(config['crypto_key'])
         if config['beacon_id'] != expected_id:
-            print(f"[!] beacon_id mismatch: expected {expected_id}, got {config['beacon_id']}")
-            print(f"[!] Fix config or remove beacon_id to auto-derive")
-            return False
+            errors.append(
+                f"beacon_id mismatch: expected {expected_id}, got {config['beacon_id']}"
+            )
+            return errors
 
     try:
         import jsonschema
     except ImportError:
-        print("[!] Missing required dependency: jsonschema")
-        print("    pip install jsonschema")
-        return False
+        errors.append("Missing required dependency: jsonschema")
+        errors.append("    pip install jsonschema")
+        return errors
 
     if schema_path is None:
         schema_path = os.path.join(os.getcwd(), "Beacon", "config", "schema.json")
     if not os.path.exists(schema_path):
-        print(f"[!] Schema file not found: {schema_path}")
-        return False
+        errors.append(f"Schema file not found: {schema_path}")
+        return errors
 
     with open(schema_path, 'r') as f:
         schema = json.load(f)
@@ -72,51 +78,51 @@ def validate_config(config: dict, schema_path: str = None) -> bool:
     try:
         jsonschema.validate(instance=config, schema=schema)
     except jsonschema.ValidationError as e:
-        print(f"[!] Schema validation failed: {e.message}")
-        return False
+        errors.append(f"Schema validation failed: {e.message}")
+        return errors
     except jsonschema.SchemaError as e:
-        print(f"[!] Schema error: {e.message}")
-        return False
+        errors.append(f"Schema error: {e.message}")
+        return errors
 
     if 'c2_channels' not in config:
-        print("[!] Missing required field: c2_channels")
-        return False
+        errors.append("Missing required field: c2_channels")
+        return errors
 
     if 'beacon_id' in config:
         if len(config['beacon_id']) != 16:
-            print(f"[!] beacon_id must be 16 hex characters (8 bytes)")
-            return False
+            errors.append("beacon_id must be 16 hex characters (8 bytes)")
+            return errors
 
     if len(config['crypto_key']) != 64:
-        print(f"[!] crypto_key must be 64 hex characters (32 bytes)")
-        return False
+        errors.append("crypto_key must be 64 hex characters (32 bytes)")
+        return errors
 
     if not config['c2_channels']:
-        print(f"[!] c2_channels must have at least 1 entry")
-        return False
+        errors.append("c2_channels must have at least 1 entry")
+        return errors
 
     if config.get('lazy_checkin', False):
         if 'lazy_checkin_max' not in config:
-            print("[!] lazy_checkin is true but lazy_checkin_max is not set")
-            return False
+            errors.append("lazy_checkin is true but lazy_checkin_max is not set")
+            return errors
         lazy_checkin_max = config['lazy_checkin_max']
         if not isinstance(lazy_checkin_max, int) or lazy_checkin_max < 1 or lazy_checkin_max > 255:
-            print("[!] lazy_checkin_max must be an integer between 1 and 255")
-            return False
+            errors.append("lazy_checkin_max must be an integer between 1 and 255")
+            return errors
 
     if 'indirect_syscall_pivot' in config:
         pivot = config['indirect_syscall_pivot']
         if not pivot:
-            print("[!] indirect_syscall_pivot cannot be empty")
-            return False
+            errors.append("indirect_syscall_pivot cannot be empty")
+            return errors
         if not pivot.startswith('Zw'):
-            print("[!] indirect_syscall_pivot must start with 'Zw'")
-            return False
+            errors.append("indirect_syscall_pivot must start with 'Zw'")
+            return errors
         if pivot.startswith('Nt'):
-            print("[!] 'Nt' functions are not allowed, use 'Zw' variant")
-            return False
+            errors.append("'Nt' functions are not allowed, use 'Zw' variant")
+            return errors
 
-    return True
+    return errors
 
 
 def parse_iso_date(date_str: str) -> int:
@@ -611,8 +617,10 @@ def main():
     schema_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), "schema.json")
     if not os.path.exists(schema_path):
         schema_path = os.path.join(os.getcwd(), "Beacon", "config", "schema.json")
-    if not validate_config(config, schema_path):
-        print("[!] Config validation failed")
+    errs = validate_config(config, schema_path)
+    if errs:
+        for err in errs:
+            print(f"[!] {err}")
         sys.exit(1)
 
     print("[+] Config validation passed")

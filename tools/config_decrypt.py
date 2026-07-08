@@ -260,7 +260,7 @@ def _parse_malleable_block(payload: bytes, offset: int) -> tuple:
 
 
 def parse_payload(payload: bytes) -> dict:
-    """Parse decrypted v2 config payload"""
+    """Parse decrypted v2 config payload (matches builder's serialization)"""
     if len(payload) < 45:
         raise ValueError("Payload too small")
 
@@ -280,89 +280,179 @@ def parse_payload(payload: bytes) -> dict:
 
     # === Parse C2 channels ===
     channels = []
+    type_map = {1: 'HTTP', 2: 'HTTPS', 3: 'TCP', 4: 'PIPE'}
     for ch_idx in range(channel_count):
         if offset + 14 > len(payload):
             raise ValueError("Payload too small for channel header")
 
-        # Channel header: type(1) + http_method(1) + host_len(1) + path_len(1) + ua_len(1) + reserved(1) + port(2) + max_failures(1) + backoff_ms(4)
+        # Header: type(1) + host_len(1) + poll_path_len(1) + submit_path_len(1) + ua_len(1) + reserved(1) + port(2) + max_failures(1)
         ch_type = payload[offset]
-        http_method = payload[offset + 1]
-        host_len = payload[offset + 2]
-        path_len = payload[offset + 3]
+        host_len = payload[offset + 1]
+        poll_path_len = payload[offset + 2]
+        submit_path_len = payload[offset + 3]
         ua_len = payload[offset + 4]
         # reserved = offset + 5
         port = payload[offset + 6] | (payload[offset + 7] << 8)
         max_failures = payload[offset + 8]
-        backoff_ms = payload[offset + 9] | (payload[offset + 10] << 8) | (payload[offset + 11] << 16) | (payload[offset + 12] << 24)
-        offset += 13
+        offset += 9
+
+        # backoff_ms (4 bytes, LE)
+        backoff_ms = struct.unpack('<I', payload[offset:offset + 4])[0]
+        offset += 4
 
         # Read strings
-        if offset + host_len + path_len + ua_len > len(payload):
+        if offset + host_len + poll_path_len + submit_path_len + ua_len > len(payload):
             raise ValueError("Payload too small for channel strings")
 
         host = payload[offset:offset + host_len].decode('utf-8')
         offset += host_len
-        path = payload[offset:offset + path_len].decode('utf-8')
-        offset += path_len
+        poll_path = payload[offset:offset + poll_path_len].decode('utf-8')
+        offset += poll_path_len
+        submit_path = payload[offset:offset + submit_path_len].decode('utf-8')
+        offset += submit_path_len
         user_agent = payload[offset:offset + ua_len].decode('utf-8')
         offset += ua_len
 
-        # Malleable mode
-        malleable_mode = payload[offset]
-        offset += 1
-
+        # 4 malleable blocks per channel: poll, submit, poll_response, submit_response
+        block_keys = ['poll_malleable', 'submit_malleable',
+                      'poll_response_malleable', 'submit_response_malleable']
         channel = {
-            'type': {1: 'HTTP', 2: 'HTTPS', 3: 'TCP', 4: 'PIPE'}.get(ch_type, 'UNKNOWN'),
-            'http_method': 'POST' if http_method else 'GET',
+            'type': type_map.get(ch_type, 'UNKNOWN'),
             'host': host,
             'port': port,
-            'path': path,
+            'poll_path': poll_path,
+            'submit_path': submit_path,
             'user_agent': user_agent,
             'max_consecutive_failures': max_failures,
             'backoff_sleep_ms': backoff_ms,
-            'malleable_mode': {0: 'global', 1: 'inline', 255: 'none'}.get(malleable_mode, 'unknown'),
         }
 
-        if malleable_mode == 1 and offset + 2 <= len(payload):
-            malleable, consumed = _parse_malleable_block(payload, offset)
-            channel['malleable_config'] = malleable
-            offset += consumed
-
-        # Response malleable mode
-        if offset >= len(payload):
-            raise ValueError("Payload too small for response malleable mode")
-        response_malleable_mode = payload[offset]
-        offset += 1
-        channel['response_malleable_mode'] = {0: 'global', 1: 'inline', 255: 'none'}.get(response_malleable_mode, 'unknown')
-
-        if response_malleable_mode == 1 and offset + 2 <= len(payload):
-            resp_malleable, consumed = _parse_malleable_block(payload, offset)
-            channel['response_malleable_config'] = resp_malleable
-            offset += consumed
+        for key in block_keys:
+            if offset >= len(payload):
+                raise ValueError("Payload too small for malleable mode")
+            mode = payload[offset]
+            offset += 1
+            channel[f'{key}_mode'] = {0: 'global', 1: 'inline', 255: 'none'}.get(mode, 'unknown')
+            if mode == 1:
+                block, consumed = _parse_malleable_block(payload, offset)
+                channel[f'{key}_config'] = block
+                offset += consumed
 
         channels.append(channel)
 
-    # --- Global malleable config ---
+    # --- Fields before global malleables ---
+    if offset + 4 > len(payload):
+        raise ValueError("Payload too small for sleep_ms")
+    sleep_ms = struct.unpack('<I', payload[offset:offset + 4])[0]
+    offset += 4
+
     if offset >= len(payload):
-        raise ValueError("Payload too small for global malleable flag")
-    has_global_malleable = payload[offset]
+        raise ValueError("Payload too small for jitter_pct")
+    jitter_pct = payload[offset]
     offset += 1
 
-    global_malleable = None
-    if has_global_malleable == 1:
-        global_malleable, consumed = _parse_malleable_block(payload, offset)
-        offset += consumed
+    if offset + 4 > len(payload):
+        raise ValueError("Payload too small for kill_date")
+    kill_date_unix = struct.unpack('<I', payload[offset:offset + 4])[0]
+    offset += 4
+    kill_date_str = ""
+    if kill_date_unix:
+        try:
+            kill_date_str = datetime.utcfromtimestamp(kill_date_unix).strftime('%Y-%m-%d')
+        except Exception:
+            kill_date_str = f"timestamp:{kill_date_unix}"
 
-    # --- Global response malleable config ---
+    if offset + 2 > len(payload):
+        raise ValueError("Payload too small for options_bitfield")
+    options_bitfield = struct.unpack('<H', payload[offset:offset + 2])[0]
+    offset += 2
+
+    options = {
+        'sandbox_evasion': bool(options_bitfield & 0x0001),
+        'debug_mode': bool(options_bitfield & 0x0002),
+        'kill_date_enabled': bool(options_bitfield & 0x0004),
+        'bypass_etw': bool(options_bitfield & 0x0008),
+        'disable_patch_etw': bool(options_bitfield & 0x0010),
+        'validate_ssl': bool(options_bitfield & 0x0020),
+        'lazy_checkin': bool(options_bitfield & 0x0040),
+        'lazy_unhook': bool(options_bitfield & 0x0080),
+    }
+    sleep_obf_val = (options_bitfield >> 8) & 3
+    sleep_obf_map = {0: 'none', 1: 'ekko', 2: 'morpheus', 3: 'ekko_runtime/foliage'}
+    sleep_obfuscation = sleep_obf_map.get(sleep_obf_val, 'unknown')
+    sleep_wipe_pe_headers = bool(options_bitfield & 0x0400)
+    sleep_stack_spoof = bool(options_bitfield & 0x0800)
+    pad_enabled = bool(options_bitfield & 0x1000)
+
     if offset >= len(payload):
-        raise ValueError("Payload too small for global response malleable flag")
-    has_global_response_malleable = payload[offset]
+        raise ValueError("Payload too small for lazy_checkin_max")
+    lazy_checkin_max = payload[offset]
     offset += 1
 
-    global_response_malleable = None
-    if has_global_response_malleable == 1:
-        global_response_malleable, consumed = _parse_malleable_block(payload, offset)
-        offset += consumed
+    if offset >= len(payload):
+        raise ValueError("Payload too small for indirect_pivot_len")
+    indirect_pivot_len = payload[offset]
+    offset += 1
+    indirect_pivot = ""
+    if indirect_pivot_len > 0:
+        if offset + indirect_pivot_len > len(payload):
+            raise ValueError("Payload too small for indirect_pivot data")
+        indirect_pivot = payload[offset:offset + indirect_pivot_len].decode('ascii')
+        offset += indirect_pivot_len
+
+    if offset + 2 > len(payload):
+        raise ValueError("Payload too small for pad_max")
+    pad_max = struct.unpack('<H', payload[offset:offset + 2])[0]
+    offset += 2
+
+    if offset + 2 > len(payload):
+        raise ValueError("Payload too small for num_spoof_frames")
+    num_spoof_frames = struct.unpack('<H', payload[offset:offset + 2])[0]
+    offset += 2
+
+    if offset + 4 > len(payload):
+        raise ValueError("Payload too small for max_response_size")
+    max_response_size = struct.unpack('<I', payload[offset:offset + 4])[0]
+    offset += 4
+
+    # Spawnto strings
+    if offset >= len(payload):
+        raise ValueError("Payload too small for spawnto_x64_len")
+    spawnto_x64_len = payload[offset]
+    offset += 1
+    spawnto_x64 = ""
+    if spawnto_x64_len > 0:
+        if offset + spawnto_x64_len > len(payload):
+            raise ValueError("Payload too small for spawnto_x64")
+        spawnto_x64 = payload[offset:offset + spawnto_x64_len].decode('utf-8')
+        offset += spawnto_x64_len
+
+    if offset >= len(payload):
+        raise ValueError("Payload too small for spawnto_x86_len")
+    spawnto_x86_len = payload[offset]
+    offset += 1
+    spawnto_x86 = ""
+    if spawnto_x86_len > 0:
+        if offset + spawnto_x86_len > len(payload):
+            raise ValueError("Payload too small for spawnto_x86")
+        spawnto_x86 = payload[offset:offset + spawnto_x86_len].decode('utf-8')
+        offset += spawnto_x86_len
+
+    # --- Global malleable configs (4 blocks: poll, submit, poll_response, submit_response) ---
+    global_keys = ['poll_malleable_config', 'submit_malleable_config',
+                   'poll_response_malleable_config', 'submit_response_malleable_config']
+    global_malleables = {}
+    for key in global_keys:
+        if offset >= len(payload):
+            raise ValueError(f"Payload too small for global malleable flag ({key})")
+        has_block = payload[offset]
+        offset += 1
+        if has_block == 1:
+            block, consumed = _parse_malleable_block(payload, offset)
+            global_malleables[key] = block
+            offset += consumed
+        else:
+            global_malleables[key] = None
 
     # --- Work hours ---
     if offset + 6 > len(payload):
@@ -377,38 +467,73 @@ def parse_payload(payload: bytes) -> dict:
     }
     offset += 6
 
-    # --- Stack chain ---
-    if offset + 2 > len(payload):
-        stack_chain = []
-    else:
-        stack_chain_count = payload[offset] | (payload[offset + 1] << 8)
+    # --- Stack chain (with optional offset field) ---
+    stack_chain = []
+    if offset + 2 <= len(payload):
+        stack_chain_count = struct.unpack('<H', payload[offset:offset + 2])[0]
         offset += 2
-        stack_chain = []
         for _ in range(stack_chain_count):
-            if offset + 2 > len(payload):
+            if offset + 4 > len(payload):
+                break
+            entry_offset = struct.unpack('<I', payload[offset:offset + 4])[0]
+            offset += 4
+            if offset >= len(payload):
                 break
             mod_len = payload[offset]
             offset += 1
             module = payload[offset:offset + mod_len].decode('utf-8') if mod_len > 0 else ""
             offset += mod_len
             if offset >= len(payload):
-                func_len = 0
-            else:
-                func_len = payload[offset]
-                offset += 1
+                break
+            func_len = payload[offset]
+            offset += 1
             function = payload[offset:offset + func_len].decode('utf-8') if func_len > 0 else ""
             offset += func_len
-            stack_chain.append({'module': module, 'function': function})
+            entry = {'module': module, 'function': function}
+            if entry_offset:
+                entry['offset'] = entry_offset
+            stack_chain.append(entry)
+
+    # --- In-memory append strings ---
+    im_append = []
+    if offset < len(payload):
+        num_im = payload[offset]
+        offset += 1
+        for _ in range(num_im):
+            if offset + 2 > len(payload):
+                break
+            s_len = struct.unpack('<H', payload[offset:offset + 2])[0]
+            offset += 2
+            if offset + s_len > len(payload):
+                break
+            s = payload[offset:offset + s_len].decode('utf-8')
+            offset += s_len
+            im_append.append(s)
 
     # --- Return parsed config ---
     config = {
         'beacon_id': beacon_id,
         'crypto_key': crypto_key,
         'channels': channels,
-        'global_malleable': global_malleable,
-        'global_response_malleable': global_response_malleable,
+        'sleep_ms': sleep_ms,
+        'jitter_pct': jitter_pct,
+        'kill_date': kill_date_str,
+        'options': options,
+        'sleep_obfuscation': sleep_obfuscation,
+        'sleep_wipe_pe_headers': sleep_wipe_pe_headers,
+        'sleep_stack_spoof': sleep_stack_spoof,
+        'pad_enabled': pad_enabled,
+        'pad_max': pad_max,
+        'lazy_checkin_max': lazy_checkin_max,
+        'indirect_syscall_pivot': indirect_pivot,
+        'num_spoof_frames': num_spoof_frames,
+        'max_response_size': max_response_size,
+        'spawnto_x64': spawnto_x64,
+        'spawnto_x86': spawnto_x86,
+        'global_malleables': global_malleables,
         'work_hours': work_hours,
         'stack_chain': stack_chain,
+        'in_memory_append': im_append,
     }
     return config
 
@@ -470,55 +595,58 @@ def main():
     print("\n" + "=" * 60)
     print("BEACON CONFIG")
     print("=" * 60)
-    config = config
     print(f"Beacon ID:    {config['beacon_id']}")
     print(f"Crypto Key:   {config['crypto_key']}")
     print(f"Channels:     {len(config['channels'])}")
     for i, ch in enumerate(config['channels']):
-        print(f"  [{i}] {ch['type']} -> {ch['host']}:{ch['port']}{ch['path']} ({ch['http_method']})")
-        print(f"      Max Fails: {ch['max_consecutive_failures']}, Backoff: {ch['backoff_sleep_ms']}ms")
-        print(f"      Malleable: {ch['malleable_mode']}")
-        if 'malleable_config' in ch:
-            mcfg = ch['malleable_config']
-            w = mcfg.get('wrapper', {})
+        print(f"  [{i}] {ch['type']} -> {ch['host']}:{ch['port']}")
+        print(f"      Poll: {ch.get('poll_path','')}  Submit: {ch.get('submit_path','')}")
+        print(f"      UA: {ch.get('user_agent','')}")
+        print(f"      Max Fails: {ch.get('max_consecutive_failures')}, Backoff: {ch.get('backoff_sleep_ms')}ms")
+        for bk in ['poll_malleable', 'submit_malleable', 'poll_response_malleable', 'submit_response_malleable']:
+            mode = ch.get(f'{bk}_mode', 'unknown')
+            print(f"      {bk}: {mode}")
+            cfg = ch.get(f'{bk}_config')
+            if cfg:
+                w = cfg.get('wrapper', {})
+                if w.get('prefix') or w.get('suffix'):
+                    print(f"        Wrapper: prefix='{w.get('prefix','')}' suffix='{w.get('suffix','')}'")
+                hdrs = cfg.get('http_headers', [])
+                if hdrs:
+                    print(f"        Headers: {len(hdrs)}")
+                    for h in hdrs:
+                        print(f"          {h['name']}: {h['value']}")
+                loc = cfg.get('payload_location', {})
+                print(f"        Location: {loc.get('type', 'unknown')}")
+
+    print(f"\nSleep:            {config.get('sleep_ms')}ms ± {config.get('jitter_pct')}%")
+    print(f"Kill Date:        {config.get('kill_date', 'none')}")
+    print(f"Sleep Obfuscation: {config.get('sleep_obfuscation', 'unknown')}")
+    print(f"  wipe_pe_headers: {config.get('sleep_wipe_pe_headers', False)}")
+    print(f"  stack_spoof:    {config.get('sleep_stack_spoof', False)}")
+    print(f"  num_spoof_frames: {config.get('num_spoof_frames', 0)}")
+    print(f"Pad:              {config.get('pad_enabled', False)} (max {config.get('pad_max', 0)})")
+    print(f"Max Response:     {config.get('max_response_size', 0)} bytes")
+    print(f"Lazy Checkin:     max={config.get('lazy_checkin_max', 1)}")
+    print(f"Indirect Syscall: {config.get('indirect_syscall_pivot', '') or 'disabled'}")
+    print(f"Spawnto:          x64={config.get('spawnto_x64', '')}  x86={config.get('spawnto_x86', '')}")
+    print(f"Options:          {config.get('options', {})}")
+
+    # Global malleable configs (4 blocks)
+    gms = config.get('global_malleables', {})
+    for gk, gv in gms.items():
+        if gv:
+            print(f"\nGlobal {gk}:")
+            w = gv.get('wrapper', {})
             if w.get('prefix') or w.get('suffix'):
-                print(f"      Wrapper: prefix='{w.get('prefix','')}' suffix='{w.get('suffix','')}'")
-            hdrs = mcfg.get('http_headers', [])
+                print(f"  Wrapper: prefix='{w.get('prefix','')}' suffix='{w.get('suffix','')}'")
+            hdrs = gv.get('http_headers', [])
             if hdrs:
-                print(f"      Headers: {len(hdrs)}")
+                print(f"  Headers: {len(hdrs)}")
                 for h in hdrs:
-                    print(f"        {h['name']}: {h['value']}")
-            loc = mcfg.get('payload_location', {})
-            print(f"      Location: {loc.get('type', 'unknown')}")
-        print(f"      Response Malleable: {ch.get('response_malleable_mode', 'unknown')}")
-        if 'response_malleable_config' in ch:
-            rmcfg = ch['response_malleable_config']
-            rw = rmcfg.get('wrapper', {})
-            if rw.get('prefix') or rw.get('suffix'):
-                print(f"      Response Wrapper: prefix='{rw.get('prefix','')}' suffix='{rw.get('suffix','')}'")
-
-    # Global malleable
-    gm = config.get('global_malleable')
-    if gm:
-        print(f"\nGlobal Malleable Config:")
-        w = gm.get('wrapper', {})
-        if w.get('prefix') or w.get('suffix'):
-            print(f"  Wrapper: prefix='{w.get('prefix','')}' suffix='{w.get('suffix','')}'")
-        hdrs = gm.get('http_headers', [])
-        if hdrs:
-            print(f"  Headers: {len(hdrs)}")
-            for h in hdrs:
-                print(f"    {h['name']}: {h['value']}")
-        loc = gm.get('payload_location', {})
-        print(f"  Location: {loc.get('type', 'unknown')}")
-
-    # Global response malleable
-    grm = config.get('global_response_malleable')
-    if grm:
-        print(f"\nGlobal Response Malleable Config:")
-        rw = grm.get('wrapper', {})
-        if rw.get('prefix') or rw.get('suffix'):
-            print(f"  Wrapper: prefix='{rw.get('prefix','')}' suffix='{rw.get('suffix','')}'")
+                    print(f"    {h['name']}: {h['value']}")
+            loc = gv.get('payload_location', {})
+            print(f"  Location: {loc.get('type', 'unknown')}")
 
     print("\nWork Hours:")
     wh = config.get('work_hours', {})
@@ -528,7 +656,14 @@ def main():
 
     print("\nStack Chain:")
     for entry in config.get('stack_chain', []):
-        print(f"  {entry['module']}!{entry['function']}")
+        off = f"  +{entry.get('offset', 0):#x}" if entry.get('offset') else ""
+        print(f"  {entry['module']}!{entry['function']}{off}")
+
+    im = config.get('in_memory_append', [])
+    if im:
+        print(f"\nIn-Memory Append ({len(im)} strings):")
+        for s in im:
+            print(f"  {s[:120]}{'...' if len(s) > 120 else ''}")
 
 
 if __name__ == '__main__':

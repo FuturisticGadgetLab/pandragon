@@ -241,9 +241,9 @@ Full example (Beacon/config/default.json):
               "type": "HTTPS",
               "host": "127.0.0.1",
               "port": 6767,
-              "path": "/api/checkin",
+              "poll_path": "/api/poll",
+              "submit_path": "/api/checkin",
               "user_agent": "Mozilla/5.0 ... Chrome/120.0.0.0",
-              "http_method": "POST",
               "max_consecutive_failures": 5,
               "backoff_sleep_ms": 10000
           }
@@ -264,7 +264,11 @@ Full example (Beacon/config/default.json):
       "num_spoof_frames": 6,
       "pad": true,
       "pad_max": 1024,
-      "malleable_config": { ... },
+      "max_response_size": 67108864,
+      "poll_malleable_config": { ... },       // see §5
+      "submit_malleable_config": { ... },      // see §5
+      "poll_response_malleable_config": { ... }, // see §5
+      "submit_response_malleable_config": { ... }, // see §5
       "work_hours": {
           "enabled": false,
           "start_hour": 9,
@@ -276,6 +280,12 @@ Full example (Beacon/config/default.json):
       "spawnto": {
           "x64": "C:\\Windows\\System32\\rundll32.exe",
           "x86": "C:\\Windows\\SysWOW64\\rundll32.exe"
+      },
+      "post_build": {
+          "append": []
+      },
+      "in_memory_append": {
+          "append": []
       }
   }
 
@@ -291,17 +301,20 @@ Full example (Beacon/config/default.json):
 ──────────────────────────────
   Array of 1-4 channel objects. At least one required.
 
-  Field                    Default    Notes
-  ─────────────────────────────────────────────────────────
-  type                     -          HTTP | HTTPS | TCP | PIPE
-  host                     -          Server hostname/IP
-  port                     1-65535    Server port
-  path                     -          HTTP path (required for HTTP/HTTPS)
-  user_agent               -          User-Agent (required for HTTP/HTTPS)
-  http_method              "GET"      GET | POST
-  max_consecutive_failures -          1-100 (failover threshold)
-  backoff_sleep_ms         -          1000-300000 (backoff in ms)
-  malleable_config         null       Per-channel malleable overrides
+    Field                    Default    Notes
+    ─────────────────────────────────────────────────────────
+    type                     -          HTTP | HTTPS | TCP | PIPE
+    host                     -          Server hostname/IP
+    port                     1-65535    Server port
+    poll_path                -          Poll path (required for HTTP/HTTPS)
+    submit_path              -          Submit path (required for HTTP/HTTPS)
+    user_agent               -          User-Agent (required for HTTP/HTTPS)
+    max_consecutive_failures -          1-100 (failover threshold)
+    backoff_sleep_ms         -          1000-300000 (backoff in ms)
+    poll_malleable_config    null       Per-channel poll (GET) malleable overrides (§5)
+    submit_malleable_config  null       Per-channel submit (POST) malleable overrides (§5)
+    poll_response_malleable_config  null  Per-channel poll response malleable overrides (§5)
+    submit_response_malleable_config  null  Per-channel submit response malleable overrides (§5)
 
   Channels are tried in order. When a channel hits its
   max_consecutive_failures the beacon rotates to the next one.
@@ -327,7 +340,7 @@ Full example (Beacon/config/default.json):
   lazy_checkin              Defer system info until a random poll
   lazy_checkin_max          1-255 (polls before guaranteed)
   lazy_unhook               Unhook DLLs only before BOF exec
-  sleep_obfuscation         none | ekko | foliage
+  sleep_obfuscation         none | ekko | ekko_runtime | morpheus | foliage
   sleep_wipe_pe_headers     Zero PE headers during sleep
   sleep_stack_spoof         Swap TEB StackBase/StackLimit to helper stack during
                             Ekko sleep; places fake return-address frames on the
@@ -406,29 +419,116 @@ Full example (Beacon/config/default.json):
 =====================================================================
 
 The malleable config controls how beacon traffic is disguised over
-the wire. It can be set globally or per-channel.
+the wire. There are four separate config objects, each with its own
+schema.  Every object can appear at the top level (global default)
+or per-channel (overrides the global for that channel).
 
-  "malleable_config": {
-      "wrapper": {
-          "prefix": "REQ_${RAND_B64:4}_",
-          "suffix": "_${JUNK:8}"
-      },
-      "http_headers": [
-          {"name": "X-Request-ID", "value": "${RAND_B64:16}"}
-      ],
-      "payload_location": {
-          "type": "body",              // body | query_param | path
-          "param_name": "q",           // for query_param
-          "path_prefix": "/assets/",   // for path
-          "path_suffix": ".png",       // for path
-          "body_content_type": "text/plain"  // for body
-      }
-  }
+5a. poll_malleable_config (GET request wrapping)
+─────────────────────────────────────────────────
+  Controls how poll (GET) request payloads are wrapped.
 
-Macros available:
+  Field              Type    Default        Description
+  ──────────────────────────────────────────────────────────────
+  wrapper            object  {}             Prefix/suffix wrapper
+  ├ prefix           string  ""             Prepended to payload
+  └ suffix           string  ""             Appended to payload
+  http_headers       array   []             Custom HTTP headers
+  │ Each entry: {name, value}
+  payload_location   object  {type:"body"}  Where to embed the payload
+  ├ type             enum    "query_param"  query_param | path
+  ├ param_name       string  "q"            Query param name (for query_param)
+  ├ path_prefix      string  ""             Path prefix (for path mode)
+  ├ path_suffix      string  ""             Path suffix (for path mode)
+  ├ body_content_type enum   "text/plain"   text/plain | application/octet-stream
+  └ cookie_name      string  ""             Cookie name for Cookie header injection
+
+  Example:
+    "poll_malleable_config": {
+        "wrapper": {
+            "prefix": "REQ_${RAND_B64:4}_",
+            "suffix": "_${JUNK:8}"
+        },
+        "http_headers": [
+            {"name": "X-Request-ID", "value": "${RAND_B64:16}"}
+        ],
+        "payload_location": {
+            "type": "query_param",
+            "param_name": "q"
+        }
+    }
+
+5b. submit_malleable_config (POST request wrapping)
+────────────────────────────────────────────────────
+  Same structure as poll_malleable_config except payload_location.type
+  also allows "body" (POST body).  Default type is "body".
+
+  payload_location.type enum:  body | query_param | path
+
+  Example:
+    "submit_malleable_config": {
+        "payload_location": {
+            "type": "body",
+            "body_content_type": "text/plain"
+        }
+    }
+
+5c. poll_response_malleable_config (GET response wrapping)
+───────────────────────────────────────────────────────────
+  Controls how the server wraps tasking data in poll responses.
+
+  Field              Type    Default        Description
+  ──────────────────────────────────────────────────────────────
+  wrapper            object  {}             Prefix/suffix wrapper
+  ├ prefix           string  ""             Prepended to response body
+  └ suffix           string  ""             Appended to response body
+  headers            object  {}             Custom HTTP response headers
+  │ Key/value pairs, key must match /^[A-Za-z0-9_-]+$/
+  body_template      string  "{{PAYLOAD}}"  Body template; {{PAYLOAD}} placeholder
+  status_code        int     200            HTTP status code (100-599)
+  payload_location   object  {type:"body"}  How the payload reaches the beacon
+  ├ type             enum    "body"         body | query_param | path
+  └ cookie_name      string  ""             Set-Cookie name (for any type)
+
+  Example:
+    "poll_response_malleable_config": {
+        "wrapper": {
+            "prefix": "<html><body><!-- ",
+            "suffix": " --></body></html>"
+        },
+        "headers": {
+            "Content-Type": "text/html"
+        },
+        "status_code": 200,
+        "payload_location": {
+            "type": "body"
+        }
+    }
+
+5d. submit_response_malleable_config (POST response wrapping)
+──────────────────────────────────────────────────────────────
+  Same structure as poll_response_malleable_config.
+  Controls how the server wraps tasking data in submit responses.
+
+  Example:
+    "submit_response_malleable_config": {
+        "wrapper": {
+            "prefix": "",
+            "suffix": ""
+        },
+        "status_code": 200,
+        "payload_location": {
+            "type": "body"
+        }
+    }
+
+5e. Macros
+──────────
   ${RAND_B64:N}     N bytes of random data, base64 encoded
   ${JUNK:N}         N bytes of random junk
-  Variables are expanded at compile time on the beacon side.
+
+  Macros are expanded at compile time on the beacon side.  They
+  can be used in any string field (wrapper prefix/suffix, header
+  values, param_name, cookie_name, body_template, etc.).
 
 
 =====================================================================
@@ -506,16 +606,16 @@ known_beacons.json
       "beacons": {
           "<16-hex-beacon-id>": {
               "crypto_key": "<64-hex-key>",
-              "allowed_routes": [
-                  {
-                      "transport_type": "HTTPS",
-                      "path": "/api/checkin",
-                      "port": 6767,
-                      "host": "127.0.0.1",
-                      "user_agent": "Mozilla/5.0 ...",
-                      "http_method": "POST"
-                  }
-              ]
+                  "allowed_routes": [
+                      {
+                          "transport_type": "HTTPS",
+                          "poll_path": "/api/poll",
+                          "submit_path": "/api/checkin",
+                          "port": 6767,
+                          "host": "127.0.0.1",
+                          "user_agent": "Mozilla/5.0 ..."
+                      }
+                  ]
           }
       }
   }

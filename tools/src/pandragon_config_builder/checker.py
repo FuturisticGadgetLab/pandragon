@@ -148,8 +148,8 @@ def check_beacon(config: dict, path: str, schema_dir: str = None) -> int:
         for i, ch in enumerate(channels):
             transport = ch.get("type", "?")
             if transport in ("HTTP", "HTTPS"):
-                if not ch.get("path", ""):
-                    e(f"c2_channels[{i}]: path required for {transport}")
+                if not ch.get("poll_path", "") or not ch.get("submit_path", ""):
+                    e(f"c2_channels[{i}]: poll_path and submit_path required for {transport}")
                     errors += 1
                 if not ch.get("user_agent", ""):
                     e(f"c2_channels[{i}]: user_agent required for {transport}")
@@ -331,8 +331,8 @@ def check_known_beacons(config: dict, path: str) -> int:
                     e(f"beacon '{bid}' allowed_routes[{ri}]: invalid transport_type")
                     errors += 1
                 if tt in ("HTTP", "HTTPS"):
-                    if not rt.get("path", ""):
-                        e(f"beacon '{bid}' allowed_routes[{ri}]: path required for {tt}")
+                    if not rt.get("poll_path", "") or not rt.get("submit_path", ""):
+                        e(f"beacon '{bid}' allowed_routes[{ri}]: poll_path and submit_path required for {tt}")
                         errors += 1
                     if not rt.get("user_agent", ""):
                         e(f"beacon '{bid}' allowed_routes[{ri}]: user_agent required for {tt}")

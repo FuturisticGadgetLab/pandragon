@@ -117,12 +117,14 @@ $(GENERATED_CONFIG): $(CONFIG_FILE) $(CONFIG_BUILDER)
 
 config: $(GENERATED_CONFIG)
 
-$(OUTPUT): $(OBJECTS)
+$(OUTPUT): $(OBJECTS) | $(GENERATED_CONFIG)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $^ -o $@
 
-$(OUTPUT_DIR)/%.o: %.cpp $(GENERATED_CONFIG)
+$(OUTPUT_DIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(OBJECTS): | $(GENERATED_CONFIG)
 
 setup:
 	@git submodule update --init --recursive 2>/dev/null || true
@@ -182,3 +184,5 @@ clean:
 	find . -type d \( -name '__pycache__' -o -name '.pytest_cache' \) -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name '*.pyc' -delete 2>/dev/null || true
 	$(ECHO) "[+] Clean"
+
+.DELETE_ON_ERROR:
