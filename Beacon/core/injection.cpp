@@ -7,16 +7,6 @@
 #include "../include/managers.h"
 #include "../libs/bastia/bastia.h"
 
-#ifdef _WIN32
-#ifndef NtCurrentProcess
-#define NtCurrentProcess() ((HANDLE)(LONG_PTR)-1)
-#endif
-#ifndef GetProcessId
-#define GetProcessId(h) ((DWORD)(UINT_PTR)(h))
-#endif
-
-static constexpr SIZE_T STACK_SIZE = 0x100000;  // 1MB default stack
-
 /* ============================================================================
  * InjectIntoProcess
  *
@@ -228,5 +218,3 @@ void SetInjectionfuncTable(functionTable* nt) {
 functionTable* getFuncTableFromGlobal() {
     return g_injectfuncTable;
 }
-
-#endif /* _WIN32 */

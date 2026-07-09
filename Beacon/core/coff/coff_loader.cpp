@@ -163,12 +163,13 @@ int SetupCOFF(
 
     struct coff_sym* symtab = (struct coff_sym*)(coff_data + hdr->PointerToSymbolTable);
 
-    char detail[384];
+    //char detail[384];
     int  retcode = 0;
     int  fmCount = 0;
     int  totalRelocs = 0;
     char shortbuf[9] = {0};
 
+    /* Honestly arbitrary values TODO fix */
     constexpr uint16_t MAX_SECTIONS = 100;
     constexpr uint32_t MAX_SYMBOLS = 100000;
 

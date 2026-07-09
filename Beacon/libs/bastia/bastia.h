@@ -17,11 +17,11 @@
     #error("Build-time seed not specified. Cannot proceed.")
 #endif
 
-// BUILD_TIME_RANDOM_SEED must be a single per-build value, identical across
-// ALL translation units.  It is XOR'd with S.hash() to produce the per-string
-// deobfuscation seed (see ConstexprStr::seed below).  If each TU got a
-// different seed, a Bastia-encrypted string defined in one TU would decrypt
-// to garbage when accessed from another TU.
+// BUILD_TIME_RANDOM_SEED is now per-translation-unit (each TU gets a unique
+// value from the build system).  The per-string seed is still XOR'd with
+// S.hash(), but the LCG constants (BASTIA_LCG_MUL / BASTIA_LCG_ADD) are now
+// derived per-TU and passed as parameters to the runtime resolve function,
+// so a single copy of the resolver in bastia.cpp can serve any TU.
 
 // ---------------------------------------------------------------------------
 // wipe_on_exit<T>
@@ -63,21 +63,27 @@ struct wipe_on_exit {
 };
 
 // ---------------------------------------------------------------------------
-// lcg LCG constants - PER-BUILD DERIVED FROM BUILD_TIME_RANDOM_SEED
-// Neutralizes static signature detection of Numerical Recipes/glibc constants.
-// Both compile-time (ct_prng) and runtime (_lcg_resolve_*) use same derivation.
+// Per-TU LCG constants: each translation unit derives its own MUL/ADD from
+// BUILD_TIME_RANDOM_SEED.  The runtime resolve function takes mul/add as
+// parameters so a single copy in bastia.cpp can serve any TU — no per-string
+// overhead, no duplicated code, and the magic derivation constants (* 0x58...)
+// never appear in the binary (they are folded at compile time into the
+// per-TU values, which rotate every build).
 // ---------------------------------------------------------------------------
-constexpr uint64_t MCLG_LCG_MUL = 
-    (BUILD_TIME_RANDOM_SEED * 0x5851F42D4C957F2DULL) ^ 0x4C957F2D5851F42DULL;
-constexpr uint64_t MCLG_LCG_ADD = 
-    (BUILD_TIME_RANDOM_SEED * 0x14057B7EF767814FULL) ^ 0xF767814F14057B7EULL;
+// NOTE: the base derivation uses compile-time-only constants; the final
+// `<< 2 | 1` and `| 1` guarantees M ≡ 1 (mod 4) and A odd, ensuring
+// maximal LCG period 2^64 regardless of BUILD_TIME_RANDOM_SEED parity.
+constexpr uint64_t BASTIA_LCG_MUL = 
+    (((BUILD_TIME_RANDOM_SEED * 0x5851F42D4C957F2DULL) ^ 0x4C957F2D5851F42DULL) << 2) | 1;
+constexpr uint64_t BASTIA_LCG_ADD = 
+    (((BUILD_TIME_RANDOM_SEED * 0x14057B7EF767814FULL) ^ 0xF767814F14057B7EULL) | 1);
 
 // ---------------------------------------------------------------------------
 // ct_prng - compile-time LCG stream cipher
 // ---------------------------------------------------------------------------
 namespace ct_prng {
-    constexpr uint64_t LCG_MULTIPLIER = MCLG_LCG_MUL;
-    constexpr uint64_t LCG_INCREMENT  = MCLG_LCG_ADD;
+    constexpr uint64_t LCG_MULTIPLIER = BASTIA_LCG_MUL;
+    constexpr uint64_t LCG_INCREMENT  = BASTIA_LCG_ADD;
 
     constexpr uint64_t next_state(uint64_t s) {
         return s * LCG_MULTIPLIER + LCG_INCREMENT;
@@ -127,9 +133,14 @@ struct obfuscated_data {
 // ---------------------------------------------------------------------------
 // Shared decrypt function; implemented once in bastia.cpp.
 // Replicates ct_prng::get_stream_value_at_index at runtime.
+// lcg_mul / lcg_add are the per-TU LCG constants (BASTIA_LCG_MUL / _ADD)
+// for the translation unit that owns the string — passed as parameters so
+// a single copy of the resolver can serve any TU.
 // ---------------------------------------------------------------------------
-void _lcg_resolve_str(const char* blob, size_t n, uint64_t seed, char* out);
-void _lcg_resolve_wstr(const wchar_t* blob, size_t n, uint64_t seed, wchar_t* out);
+void _lcg_resolve_str(const char* blob, size_t n, uint64_t seed,
+                      uint64_t lcg_mul, uint64_t lcg_add, char* out);
+void _lcg_resolve_wstr(const wchar_t* blob, size_t n, uint64_t seed,
+                       uint64_t lcg_mul, uint64_t lcg_add, wchar_t* out);
 
 // ---------------------------------------------------------------------------
 // NTTP string wrappers - StrParam / WStrParam          (C++20 structural types)
@@ -203,7 +214,8 @@ struct _StaticStr {
         static bool ready = false;
         if (!ready) {
             volatile uint64_t runtime_seed = seed;
-            _lcg_resolve_str(blob.data, N, runtime_seed, buf);
+            _lcg_resolve_str(blob.data, N, runtime_seed,
+                             BASTIA_LCG_MUL, BASTIA_LCG_ADD, buf);
             ready = true;
         }
         return buf;
@@ -231,7 +243,8 @@ struct ObfuscatedStr {
         static bool ready = false;
         if (!ready) {
             volatile uint64_t runtime_seed = seed;
-            _lcg_resolve_str(blob.data, N, runtime_seed, buf);
+            _lcg_resolve_str(blob.data, N, runtime_seed,
+                             BASTIA_LCG_MUL, BASTIA_LCG_ADD, buf);
             ready = true;
         }
         return buf;
@@ -242,7 +255,8 @@ struct ObfuscatedStr {
         static bool ready = false;
         if (!ready) {
             volatile uint64_t runtime_seed = seed;
-            _lcg_resolve_str(blob.data, N, runtime_seed, buf);
+            _lcg_resolve_str(blob.data, N, runtime_seed,
+                             BASTIA_LCG_MUL, BASTIA_LCG_ADD, buf);
             ready = true;
         }
         return wipe_on_exit<char>{ buf, N, &ready };
@@ -260,7 +274,8 @@ struct ObfuscatedWStr {
         static bool    ready = false;
         if (!ready) {
             volatile uint64_t runtime_seed = seed;
-            _lcg_resolve_wstr(blob.data, N, runtime_seed, buf);
+            _lcg_resolve_wstr(blob.data, N, runtime_seed,
+                              BASTIA_LCG_MUL, BASTIA_LCG_ADD, buf);
             ready = true;
         }
         return buf;
@@ -271,7 +286,8 @@ struct ObfuscatedWStr {
         static bool    ready = false;
         if (!ready) {
             volatile uint64_t runtime_seed = seed;
-            _lcg_resolve_wstr(blob.data, N, runtime_seed, buf);
+            _lcg_resolve_wstr(blob.data, N, runtime_seed,
+                              BASTIA_LCG_MUL, BASTIA_LCG_ADD, buf);
             ready = true;
         }
         return wipe_on_exit<wchar_t>{ buf, N, &ready };

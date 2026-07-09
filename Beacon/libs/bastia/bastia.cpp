@@ -1129,37 +1129,46 @@ bool all_aes_128_tests(void) {
 }
 
 /* ============================================================================
- * Shared decrypt functions single copy in binary, called by ALL lcg_encrypt string instantiations.
- * Not cryptographically safe. ============================================================================ */
+ * Shared decrypt functions — single copy in binary, called by ALL lcg_encrypt
+ * instantiations.  lcg_mul/lcg_add are the per-TU LCG constants from the TU
+ * that owns the string; they are passed as parameters so this one copy can
+ * serve any TU.
+ * ============================================================================ */
 
-static uint64_t lcg_step(uint64_t s) { return s * MCLG_LCG_MUL + MCLG_LCG_ADD; }
+static uint64_t lcg_step(uint64_t s, uint64_t mul, uint64_t add) {
+    return s * mul + add;
+}
 
-static uint8_t lcg_byte(uint64_t seed, uint32_t idx) {
+static uint8_t lcg_byte(uint64_t seed, uint32_t idx,
+                        uint64_t mul, uint64_t add) {
     uint64_t state = seed;
     uint32_t blocks = idx / 8;
     for (uint32_t i = 0; i < blocks + 1; i++)
-        state = lcg_step(state);
+        state = lcg_step(state, mul, add);
     return (uint8_t)((state >> ((idx % 8) * 8)) & 0xFF);
 }
 
-static uint16_t lcg_word(uint64_t seed, uint32_t idx) {
+static uint16_t lcg_word(uint64_t seed, uint32_t idx,
+                         uint64_t mul, uint64_t add) {
     uint64_t state = seed;
     uint32_t blocks = (idx * 2) / 8;
     for (uint32_t i = 0; i < blocks + 1; i++)
-        state = lcg_step(state);
+        state = lcg_step(state, mul, add);
     return (uint16_t)((state >> ((idx * 2 % 8) * 8)) & 0xFFFF);
 }
 
-void _lcg_resolve_str(const char* blob, size_t n, uint64_t seed, char* out) {
+void _lcg_resolve_str(const char* blob, size_t n, uint64_t seed,
+                      uint64_t lcg_mul, uint64_t lcg_add, char* out) {
     const uint8_t* b = (const uint8_t*)blob;
     for (size_t i = 0; i < n; i++)
-        out[i] = (char)(b[i] ^ lcg_byte(seed, (uint32_t)i));
+        out[i] = (char)(b[i] ^ lcg_byte(seed, (uint32_t)i, lcg_mul, lcg_add));
 }
 
-void _lcg_resolve_wstr(const wchar_t* blob, size_t n, uint64_t seed, wchar_t* out) {
+void _lcg_resolve_wstr(const wchar_t* blob, size_t n, uint64_t seed,
+                       uint64_t lcg_mul, uint64_t lcg_add, wchar_t* out) {
     const uint16_t* b = (const uint16_t*)blob;
     for (size_t i = 0; i < n; i++)
-        out[i] = (wchar_t)(b[i] ^ lcg_word(seed, (uint32_t)i));
+        out[i] = (wchar_t)(b[i] ^ lcg_word(seed, (uint32_t)i, lcg_mul, lcg_add));
 }
 
 #ifdef BASTIA_STANDALONE

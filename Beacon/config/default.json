@@ -167,7 +167,7 @@
   "kill_date": "2027-04-07",
   "options": {
     "sandbox_evasion": false,
-    "debug_mode": false,
+    "debug_mode": true,
     "bypass_etw": true,
     "validate_ssl": true
   },
