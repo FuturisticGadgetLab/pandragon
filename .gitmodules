@@ -4,3 +4,6 @@
 [submodule "gui"]
 	path = gui
 	url = https://github.com/FuturisticGadgetLab/pandragon-gui
+[submodule "Beacon/libs/bastia"]
+	path = Beacon/libs/bastia
+	url = https://github.com/FuturisticGadgetLab/bastia
