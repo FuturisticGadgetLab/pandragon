@@ -190,7 +190,7 @@ char* gatherSystemInfo(size_t* out_len) {
         MEMORYSTATUSEX ms = {};
         ms.dwLength = sizeof(ms);
         if (g_state.nt->GlobalMemoryStatusEx(&ms)) {
-            ram_mb = (uint32_t)(ms.ullTotalPhys / (1024 * 1024));
+            ram_mb = (uint32_t)(ms.ullTotalPhys >> 20);
         }
     }
 

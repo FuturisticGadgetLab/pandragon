@@ -395,11 +395,11 @@ def check_consistency(root: str = ".", server_dir: str = "server") -> int:
                     e(f"    Run 'make config' to sync")
                     errors += 1
             else:
-                w("known_beacons.json not found — sync check skipped")
+                w("known_beacons.json not found, sync check skipped")
         else:
-            w("Beacon/config/default.json has no crypto_key — sync irrelevant")
+            w("Beacon/config/default.json has no crypto_key, sync irrelevant")
     else:
-        w("Beacon/config/default.json not found — sync check skipped")
+        w("Beacon/config/default.json not found, sync check skipped")
 
     server_cfg = proj / server_dir / "config.json"
     if server_cfg.exists():
@@ -446,7 +446,7 @@ def check_all(root: str = ".", server_dir: str = "server") -> int:
         print(f"[{label}] {rel_path}")
         print(f"{'─' * 50}")
         if not path.exists():
-            w("File not found — skipping")
+            w("File not found, skipping")
             continue
         try:
             with open(path) as f:
@@ -469,7 +469,7 @@ def check_all(root: str = ".", server_dir: str = "server") -> int:
                 kwargs["schema_dir"] = str(proj / "Beacon" / "config")
             total_errors += validators[ctype](config, str(path), **kwargs)
         else:
-            w(f"Unrecognized config type — skipping")
+            w(f"Unrecognized config type, skipping")
 
     print()
     total_errors += check_consistency(root, server_dir)

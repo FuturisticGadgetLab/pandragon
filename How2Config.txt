@@ -586,7 +586,7 @@ or per-channel (overrides the global for that channel).
   cd server && python3 run.py create <username> --token <64-hex-token>
 
   Creates an operator and appends the credentials to server/config.json
-  under the "operators" key.  The token is NOT hashed — stored as-is.
+  under the "operators" key.  The token is NOT hashed but stored as-is.
 
 
 =====================================================================

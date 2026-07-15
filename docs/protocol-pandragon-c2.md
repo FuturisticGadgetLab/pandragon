@@ -380,7 +380,7 @@ attempted; the server treats the boot state as unknown.
 **Limitation**: If the beacon process restarts within the same boot (e.g.
 kill and re-run), uptime will be larger than last reported, so the reboot
 detection is not triggered and seq_num=1 will be rejected. This is an
-accepted trade-off — a full boot GUID would require additional API calls
+accepted trade-off, a full boot GUID would require additional API calls
 and struct definitions for an edge case.
 
 ### 5.7 Key Rotation Protocol
@@ -578,7 +578,7 @@ e5 f6 a7 b8
 ```
 
 Payload (uptime prefix + binary system info):
-[8] uptime_ms       (system uptime in ms, uint64 LE — for reboot detection)
+[8] uptime_ms       (system uptime in ms, uint64 LE, for reboot detection)
 [4] os_major        (PEB->OSMajorVersion)
 [4] os_minor        (PEB->OSMinorVersion)  
 [4] os_build        (PEB->OSBuildNumber)

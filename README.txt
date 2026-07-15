@@ -135,12 +135,12 @@ Build Commands:
   make CONFIG_FILE=...   - Custom config file (default: Beacon/config/default.json)
   make force-config      - Regenerate config even if inputs haven't changed
 
-Server (Production — standalone binary for deployment):
+Server (Production, standalone binary for deployment):
   make setup              # Create venv, install deps, build Cython parser
   make server             # Builds build/PandragonServer (PyInstaller binary)
   build/PandragonServer   # Run the binary directly (no venv needed)
 
-Server (Development — hot-reload, tests, debug):
+Server (Development, hot-reload, tests, debug):
   make setup                      # Recommended first run
   make run-server                 # Builds parser if needed, starts teamserver
   make run-server-args ARGS="..." # Pass custom args, e.g. --debug or "create admin"
@@ -176,7 +176,7 @@ Operator GUI:
 ============================================================================
 
   The teamserver can be deployed via Docker. The beacon and GUI are not
-  containerised — the beacon is a Windows PE and the GUI is a desktop app.
+  containerised, the beacon is a Windows PE and the GUI is a desktop app.
 
   Prerequisites:
     - Docker Engine 24+ with Compose V2 plugin
@@ -214,9 +214,9 @@ Operator GUI:
       the host
 
   Ports (default config):
-    6767/tcp  — Operator HTTPS (WebSocket + beacon routes)
-    8080/tcp  — Beacon HTTP
-    6868/tcp  — Beacon TCP (localhost only by default)
+    6767/tcp  -> Operator HTTPS (WebSocket + beacon routes)
+    8080/tcp  -> Beacon HTTP
+    6868/tcp  -> Beacon TCP (localhost only by default)
 
   Docker Compose config: docker-compose.yml
 

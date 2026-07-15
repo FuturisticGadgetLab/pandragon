@@ -26,9 +26,19 @@ typedef unsigned   uint32_t;
 
 typedef unsigned long long   uint64_t;
 typedef long long  int64_t;
+#ifndef size_t
 #ifdef _WIN64
 typedef unsigned long long size_t;
-typedef size_t SIZE_T;
+#else
+typedef unsigned int size_t;
+#endif
+#endif
+#ifndef SIZE_T
+#ifdef _WIN64
+typedef unsigned long long SIZE_T;
+#else
+typedef unsigned long SIZE_T;
+#endif
 #endif
 #define UINT8_MAX 255
 #define UINT16_MAX 65535

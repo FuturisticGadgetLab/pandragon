@@ -31,11 +31,11 @@
 #include "../../include/network/net_abstract.h"
 #include "../../libs/bastia/bastia.h"
 
-//#if defined(__x86_64__) || defined(_WIN64)
+#if defined(__x86_64__) || defined(_WIN64)
 #  define PREPENDSYMBOLVALUE "__imp_"
-//#else
-//#  define PREPENDSYMBOLVALUE "__imp__"
-//#endif
+#else
+#  define PREPENDSYMBOLVALUE "__imp__"
+#endif
 
 #define COFFSETUP_BAIL_IF(expr, code, fmt, ...) \
     if ((expr)) { \

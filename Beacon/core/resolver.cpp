@@ -2029,9 +2029,22 @@ uint32_t getCurrentUnixTime(functionTable* f) {
     // Unix time is seconds since 1970-01-01
     // Difference: 116444736000000000 (100-ns intervals)
     li.QuadPart -= 116444736000000000LL;
+#ifdef __i386__
+    // Use x86 DIVL (EDX:EAX / r/m32) to avoid __divdi3/libcall
+    uint32_t lo32 = (uint32_t)li.LowPart;
+    uint32_t hi32 = (uint32_t)li.HighPart;
+    uint32_t q1 = 0, r1 = 0, q2, r2;
+    if (hi32 >= 10000000) {
+        __asm__("divl %4" : "=a"(q1), "=d"(r1) : "d"(0U), "a"(hi32), "rm"(10000000U));
+    } else {
+        r1 = hi32;
+    }
+    __asm__("divl %4" : "=a"(q2), "=d"(r2) : "d"(r1), "a"(lo32), "rm"(10000000U));
+    return q2;
+#else
     li.QuadPart /= 10000000;  // Convert to seconds
-    
     return (uint32_t)li.QuadPart;
+#endif
 }
 
 /**

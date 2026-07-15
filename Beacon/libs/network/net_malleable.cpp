@@ -57,7 +57,7 @@ static uint8_t g_submit_path_prefix_len = 0;
 static uint8_t g_submit_path_suffix_len = 0;
 
 // ===========================================================================
-// POLL-response (S2B) malleable config — used by getMessage() to unwrap
+// POLL-response (S2B) malleable config, used by getMessage() to unwrap
 // ===========================================================================
 static bool    g_poll_response_set = false;
 static char*   g_poll_response_wrapper_prefix = nullptr;
@@ -68,8 +68,8 @@ static char*   g_poll_response_cookie_name = nullptr;
 static uint8_t g_poll_response_cookie_name_len = 0;
 
 // ===========================================================================
-// SUBMIT-response (S2B) malleable config — currently unused by beacon
-// (submit responses are discarded), kept for symmetry with server config.
+// SUBMIT-response (S2B) malleable config, currently unused by beacon
+// (submit responses are discarded), kept for symmetry with server config. TODO fix
 // ===========================================================================
 static bool    g_submit_response_set = false;
 static char*   g_submit_response_wrapper_prefix = nullptr;

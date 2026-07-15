@@ -24,9 +24,11 @@ uint32_t ApplySleepJitter(uint32_t sleep_ms, uint8_t jitter_pct) {
     uint8_t random_factor = (r >> 8) & 0xFF;
     uint32_t jitter_range = (sleep_ms * jitter_pct) / 100;
     
-    // Use int64_t to prevent overflow during intermediate calculation
-    int64_t jitter_offset = (static_cast<int64_t>(random_factor) - 128) * static_cast<int64_t>(jitter_range) / 128;
-    int64_t result = static_cast<int64_t>(sleep_ms) + jitter_offset;
+    // random_factor is uint8_t (0-255), jitter_range is uint32_t (small),
+    // all intermediates fit in int32_t, avoids a 64-bit div on x86
+    int32_t jitter_offset = (static_cast<int32_t>(random_factor) - 128)
+                          * static_cast<int32_t>(jitter_range) / 128;
+    int32_t result = static_cast<int32_t>(sleep_ms) + jitter_offset;
 
     return (result < 1) ? 1 : static_cast<uint32_t>(result);
 }
@@ -85,7 +87,7 @@ PandragonRuntime::PandragonRuntime()
 }
 
 BeaconError PandragonRuntime::initialize(functionTable* funcTable) {
-    g_debugPrint("[PandragonRuntime::initialize] ENTER: funcTable=%p", (void*)funcTable);
+    g_debugPrint("ENTER: funcTable=%p", (void*)funcTable);
     
     if (!funcTable) {
         return BeaconError::INVALID_PARAMETER;
@@ -95,47 +97,47 @@ BeaconError PandragonRuntime::initialize(functionTable* funcTable) {
     g_functionTable = funcTable;
 
     // Initialize managers using __malloc (freestanding-compatible)
-    g_VERBOSE("[PandragonRuntime::initialize] Allocating FileTransferManager...");
+    g_VERBOSE("Allocating FileTransferManager...");
     m_fileTransferManager  = reinterpret_cast<FileTransferManager*>(
         __malloc(sizeof(FileTransferManager)));
-    g_VERBOSE("[PandragonRuntime::initialize] FileTransferManager allocated at %p", (void*)m_fileTransferManager);
+    g_VERBOSE("FileTransferManager allocated at %p", (void*)m_fileTransferManager);
     
-    g_VERBOSE("[PandragonRuntime::initialize] Allocating NetworkManager...");
+    g_VERBOSE("Allocating NetworkManager...");
     m_networkManager       = reinterpret_cast<NetworkManager*>(
         __malloc(sizeof(NetworkManager)));
-    g_VERBOSE("[PandragonRuntime::initialize] NetworkManager allocated at %p", (void*)m_networkManager);
+    g_VERBOSE("NetworkManager allocated at %p", (void*)m_networkManager);
     
-    g_VERBOSE("[PandragonRuntime::initialize] Allocating CommandDispatcher...");
+    g_VERBOSE("Allocating CommandDispatcher...");
     m_commandDispatcher    = reinterpret_cast<CommandDispatcher*>(
         __malloc(sizeof(CommandDispatcher)));
-    g_VERBOSE("[PandragonRuntime::initialize] CommandDispatcher allocated at %p", (void*)m_commandDispatcher);
+    g_VERBOSE("CommandDispatcher allocated at %p", (void*)m_commandDispatcher);
 
     if (!m_fileTransferManager || !m_networkManager || !m_commandDispatcher) {
-        g_debugPrint("[PandragonRuntime::initialize] Allocation failed!");
+        g_debugPrint("Allocation failed!");
         return BeaconError::ALLOCATION_FAILED;
     }
 
     // Placement new for construction
-    g_VERBOSE("[PandragonRuntime::initialize] Constructing FileTransferManager...");
+    g_VERBOSE("Constructing FileTransferManager...");
     new (m_fileTransferManager) FileTransferManager();
-    g_VERBOSE("[PandragonRuntime::initialize] FileTransferManager constructed");
+    g_VERBOSE("FileTransferManager constructed");
     
-    g_VERBOSE("[PandragonRuntime::initialize] Constructing NetworkManager...");
+    g_VERBOSE("Constructing NetworkManager...");
     new (m_networkManager) NetworkManager();
-    g_VERBOSE("[PandragonRuntime::initialize] NetworkManager constructed");
+    g_VERBOSE("NetworkManager constructed");
     
-    g_VERBOSE("[PandragonRuntime::initialize] Constructing CommandDispatcher...");
+    g_VERBOSE("Constructing CommandDispatcher...");
     new (m_commandDispatcher) CommandDispatcher();
-    g_VERBOSE("[PandragonRuntime::initialize] CommandDispatcher constructed");
+    g_VERBOSE("CommandDispatcher constructed");
 
     m_fileTransferManager->initialize();
-    g_VERBOSE("[PandragonRuntime::initialize] FileTransferManager initialized");
+    g_VERBOSE("FileTransferManager initialized");
     
     m_commandDispatcher->initializeBuiltInHandlers();
-    g_VERBOSE("[PandragonRuntime::initialize] CommandDispatcher handlers initialized");
+    g_VERBOSE("CommandDispatcher handlers initialized");
 
     m_initialized.store(true, std::memory_order_release);
-    g_debugPrint("[PandragonRuntime::initialize] EXIT: SUCCESS");
+    g_debugPrint("EXIT: SUCCESS");
     return BeaconError::SUCCESS;
 }
 

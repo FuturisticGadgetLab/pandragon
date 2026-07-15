@@ -1,6 +1,20 @@
-TARGET = x86_64-w64-windows-gnu
+ARCH ?= x86_64
+ifeq ($(ARCH),x86_64)
+    TARGET = x86_64-w64-windows-gnu
+    OUTPUT_SUFFIX =
+    CXXFLAGS_ARCH = -maes
+    ENTRY = __start
+else ifeq ($(ARCH),x86)
+    TARGET = i686-w64-windows-gnu
+    OUTPUT_SUFFIX = _x86
+    CXXFLAGS_ARCH = -maes -msse2
+    ENTRY = __start
+else
+    $(error Unsupported ARCH '$(ARCH)'. Use 'x86_64' or 'x86')
+endif
+
 OUTPUT_DIR = build/beacon
-OUTPUT = $(OUTPUT_DIR)/pandragon.exe
+OUTPUT = $(OUTPUT_DIR)/pandragon$(OUTPUT_SUFFIX).exe
 
 PYTHON = python3
 CONFIG_BUILDER = tools/config_builder.py
@@ -23,10 +37,10 @@ endif
 # BUILD_TIME_RANDOM_SEED is now evaluated per translation unit (see pattern
 # rule below).  Each .cpp gets a unique seed, so strings compiled in different
 # TUs use different LCG streams even for identical literals.  The magic LCG
-# derivation constants stay compile-time only — never visible in the binary.
+# derivation constants stay compile-time only, never visible in the binary.
 
 CXXFLAGS = -target $(TARGET) -nostdlib -nostartfiles -Oz -std=c++20 \
-           -maes -fno-builtin -fno-threadsafe-statics -fno-exceptions \
+           $(CXXFLAGS_ARCH) -fno-builtin -fno-threadsafe-statics -fno-exceptions \
            -Wall -flto=full -MD -MP -ffunction-sections -fdata-sections \
            -fvisibility=hidden -Wl,--build-id=none \
            -fno-unwind-tables -fno-asynchronous-unwind-tables \
@@ -47,7 +61,7 @@ else
 endif
 
 LDFLAGS = -fuse-ld=lld \
-          -Wl,--entry=__start -Wl,--gc-sections -Wl,-s \
+          -Wl,--entry=$(ENTRY) -Wl,--gc-sections -Wl,-s \
           -Wl,--no-dynamicbase -Wl,--subsystem,console
 
 SOURCES = $(shell find Beacon -name '*.cpp' ! -path '*/test/*' \
@@ -65,7 +79,7 @@ endif
         server gui run-server run-server-args run-gui
 
 all: check-debug-consistency keys $(OUTPUT)
-	$(ECHO) "[+] Beacon: $(OUTPUT)"
+	$(ECHO) "[+] Beacon ($(ARCH)): $(OUTPUT)"
 
 -include $(DEPS)
 

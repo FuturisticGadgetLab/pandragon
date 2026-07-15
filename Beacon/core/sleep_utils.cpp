@@ -9,7 +9,7 @@ __attribute__((noinline))
 int enumerateCodeSections(PVOID imageBase, SleepSectionInfo* sections, int maxSections) {
     PIMAGE_DOS_HEADER dos = (PIMAGE_DOS_HEADER)imageBase;
     PIMAGE_NT_HEADERS nt = (PIMAGE_NT_HEADERS)((BYTE*)imageBase + dos->e_lfanew);
-    PIMAGE_SECTION_HEADER sec = (PIMAGE_SECTION_HEADER)((BYTE*)nt + sizeof(IMAGE_NT_HEADERS));
+    PIMAGE_SECTION_HEADER sec = IMAGE_FIRST_SECTION(nt);
 
     int count = 0;
     for (WORD i = 0; i < nt->FileHeader.NumberOfSections && count < maxSections; i++) {

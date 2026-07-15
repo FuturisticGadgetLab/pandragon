@@ -912,7 +912,11 @@ typedef struct _SCH_CREDENTIALS {
     PSecBuffer pBuffers;
   } SecBufferDesc,*PSecBufferDesc;
 
+#ifdef _WIN64
 typedef unsigned __int64 QWORD;
+#else
+typedef unsigned long long QWORD;
+#endif
   typedef QWORD SECURITY_INTEGER,*PSECURITY_INTEGER;
 #define SEC_SUCCESS(Status) ((Status) >= 0)
 
@@ -3868,14 +3872,18 @@ typedef struct {
 #define UP -32
 #define DOWN 32
 #define STACK_ARGS_LENGTH 8
+#ifdef _WIN64
 #define STACK_ARGS_RSP_OFFSET 0x28
+#else
+#define STACK_ARGS_RSP_OFFSET 0x14
+#endif
 #define X64_PEB_OFFSET 0x60
 
 /* Randomized RET gadget collection */
 #define MAX_RET_GADGETS 32
 
 typedef struct _RET_GADGET {
-    UINT64 addr;     /* address of 'add rsp, imm8; ret' sequence */
+    ULONG_PTR addr;  /* address of 'add rsp, imm8; ret' sequence */
     UINT8  imm8;     /* the immediate value (stack adjustment) */
 } RET_GADGET;
 
@@ -4301,20 +4309,20 @@ typedef struct _I_SYSCALLS_CTX {
     PVOID exceptionHandlerHandle;
     HANDLE myThread;
     HANDLE hNtdll;
-    UINT64 ntFunctionAddress;
-    UINT64 k32FunctionAddress;
+    ULONG_PTR ntFunctionAddress;
+    ULONG_PTR k32FunctionAddress;
     RET_GADGET gadgetTable[MAX_RET_GADGETS];  /* randomized RET gadget pool */
     int      gadgetCount;                      /* number of collected gadgets */
     UINT64 stackArgs[STACK_ARGS_LENGTH];
-    UINT64 callRegGadgetAddress;
-    UINT64 callRegGadgetAddressRet;
+    ULONG_PTR callRegGadgetAddress;
+    ULONG_PTR callRegGadgetAddressRet;
     char callRegGadgetValue;
-    UINT64 regBackup;
-    UINT64 cachedSSN;              // WORD promoted to UINT64
-    UINT64 cachedSyscallRetAddr;   // syscall;ret address in target stub
-    UINT64 pivotApiAddr;           // NtWaitForSingleObject address
-    UINT64 threadInitThunkRetAddr;   // kernel32!BaseThreadInitThunk + 0x14
-    UINT64 rtlUserThreadStartAddr;   // ntdll!RtlUserThreadStart + 0x21
+    ULONG_PTR regBackup;
+    ULONG_PTR cachedSSN;              // WORD promoted to ULONG_PTR
+    ULONG_PTR cachedSyscallRetAddr;   // syscall;ret address in target stub
+    ULONG_PTR pivotApiAddr;           // NtWaitForSingleObject address
+    ULONG_PTR threadInitThunkRetAddr;   // kernel32!BaseThreadInitThunk + 0x14
+    ULONG_PTR rtlUserThreadStartAddr;   // ntdll!RtlUserThreadStart + 0x21
 
 } I_SYSCALLS_CTX, *PI_SYSCALLS_CTX;
 

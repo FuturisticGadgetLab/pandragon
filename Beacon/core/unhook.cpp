@@ -101,7 +101,11 @@ static PVOID MapDllFromKnownDlls(functionTable* nt, const char* dllName) {
     if (!NT_SUCCESS(status) || !base) return nullptr;
 
     auto dos = (PIMAGE_DOS_HEADER)base;
+#ifdef _WIN64
     auto ntHdrs = (PIMAGE_NT_HEADERS64)((PBYTE)base + dos->e_lfanew);
+#else
+    auto ntHdrs = (PIMAGE_NT_HEADERS)((PBYTE)base + dos->e_lfanew);
+#endif
 
     if (dos->e_magic != IMAGE_DOS_SIGNATURE || ntHdrs->Signature != IMAGE_NT_SIGNATURE) {
         nt->NtUnmapViewOfSection(NtCurrentProcess(), base);

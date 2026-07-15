@@ -457,7 +457,7 @@ static void randB64(char* dest, size_t len) {
     if (!dest || len == 0) return;
 
     for (size_t i = 0; i < len; i++) {
-        uint64_t r = ___rdtsc();
+        uint32_t r = (uint32_t)___rdtsc();
         dest[i] = get_base64_chars()[r % 64];
     }
     dest[len] = '\0';
@@ -473,7 +473,7 @@ static void randJunk(char* dest, size_t len) {
     static const char* url_safe = lcg_encrypt("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789");
     
     for (size_t i = 0; i < len; i++) {
-        uint64_t r = ___rdtsc();
+        uint32_t r = (uint32_t)___rdtsc();
         dest[i] = url_safe[r % 62];
     }
     dest[len] = '\0';
@@ -482,7 +482,7 @@ static void randJunk(char* dest, size_t len) {
 /**
  * Convert unsigned long long to string (simple implementation)
  */
-static char* ulltoa(uint64_t val, char* buf, size_t bufsize) {
+static char* ulltoa(uint32_t val, char* buf, size_t bufsize) {
     if (!buf || bufsize < 2) return NULL;
     
     char* p = buf + bufsize - 1;
@@ -604,7 +604,7 @@ char* expandMacros(const char* input) {
             
             // ${TIMESTAMP}
             if (macro_len == 12 && __strncmp(p, lcg_encrypt("${TIMESTAMP}"), 12) == 0) {
-                uint64_t ts = ___rdtsc() / 1000000;  // Approximate timestamp
+                uint64_t ts = (uint64_t)(uint32_t)(___rdtsc() >> 20);  // Approximate timestamp
                 char ts_buf[24];
                 char* ts_str = ulltoa(ts, ts_buf, sizeof(ts_buf));
                 size_t ts_len = __strlen(ts_str);
@@ -616,7 +616,7 @@ char* expandMacros(const char* input) {
             
             // ${PAD_BASE64}
             if (macro_len == 12 && __strncmp(p, lcg_encrypt("${PAD_BASE64}"), 12) == 0) {
-                uint64_t r = ___rdtsc();
+                uint32_t r = (uint32_t)___rdtsc();
                 if (r & 1) {
                     *out++ = '=';
                     *out++ = '=';
@@ -1015,6 +1015,164 @@ NAKED void __chkstk(void) {
 
 #endif // ARCH_X86
 
+/*
+ * Stack allocation function (_alloca)
+ * Implemented in inline assembly for GCC/Clang (MinGW/LLVM).
+ * These functions must be 'naked' because they directly manipulate the stack pointer
+ * and the return address outside the normal C frame.
+ */
+
+// MinGW headers define _alloca(x) as __builtin_alloca(x) - undef to allow custom impl
+#undef _alloca
+
+#if defined(ARCH_X64)
+
+/* * ----------------------------------------------------------------------------
+ * x64 Implementation of _alloca
+ *
+ * Input:  RCX = size (bytes)
+ * Output: RAX = pointer to allocated block (16‑byte aligned)
+ *
+ * Preserves all callee‑saved registers (RBX, RBP, RDI, RSI, R12–R15, XMM6–15).
+ * ----------------------------------------------------------------------------
+ */
+extern "C"
+__attribute__((used))
+NAKED void* _alloca(size_t size) {
+    __asm__ volatile (
+        // --- Zero size ---
+        "test   %rcx, %rcx             \n\t"
+        "jz     .Lzero_x64             \n\t"
+
+        // --- Align size to 16 ---
+        "mov    %rcx, %rax             \n\t"
+        "add    $15, %rax              \n\t"
+        "and    $-16, %rax             \n\t"   // rax = aligned_size
+
+        // --- Save original RSP and compute target pointer ---
+        "mov    %rsp, %r9              \n\t"   // r9 = original RSP (return address)
+        "mov    %r9, %rdx              \n\t"
+        "sub    %rax, %rdx             \n\t"   // rdx = original RSP - aligned_size
+        "cmp    %r9, %rdx              \n\t"   // overflow check (unsigned)
+        "ja     .Loverflow_x64         \n\t"
+        "and    $-16, %rdx             \n\t"   // rdx = target = 16‑byte aligned start of block
+
+        // --- New RSP (target – 8) holds the return address ---
+        "lea    -8(%rdx), %r8          \n\t"   // r8 = new_rsp
+
+        // --- Stack limit check ---
+        "mov    %gs:0x10, %rax         \n\t"   // rax = TIB->StackLimit
+        "cmp    %r8, %rax              \n\t"
+        "ja     .Loverflow_x64         \n\t"   // new_rsp below StackLimit?
+
+        // --- Copy return address down to new_rsp ---
+        "mov    (%rsp), %rcx           \n\t"   // rcx = original return address
+        "mov    %rcx, (%r8)            \n\t"
+        "mov    %r8, %rsp              \n\t"   // RSP ← new_rsp (now points to copy)
+
+        // --- Probe each page from StackLimit down to new_rsp ---
+        "1:                            \n\t"
+        "sub    $0x1000, %rax          \n\t"
+        "test   %rax, (%rax)           \n\t"   // touch the page
+        "cmp    %r8, %rax              \n\t"
+        "ja     1b                     \n\t"
+
+        // --- Return value = target (rdx), then ret uses [rsp] ---
+        "mov    %rdx, %rax             \n\t"
+        "ret                            \n\t"
+
+        // --- Zero size: return current RSP ---
+        ".Lzero_x64:                   \n\t"
+        "mov    %rsp, %rax             \n\t"
+        "ret                            \n\t"
+
+        // --- Overflow / error – debugging trap ---
+        ".Loverflow_x64:               \n\t"
+        "int3                           \n\t"
+    );
+}
+
+#endif // ARCH_X64
+
+#if defined(ARCH_X86)
+
+/* * ----------------------------------------------------------------------------
+ * x86 Implementation of _alloca
+ *
+ * Input:  [ESP+4] = size   (cdecl: caller pushes size)
+ * Output: EAX = pointer to allocated block (16‑byte aligned)
+ *
+ * Preserves all callee‑saved registers (EBX, EBP, ESI, EDI).
+ * ----------------------------------------------------------------------------
+ */
+extern "C"
+__attribute__((used))
+NAKED void* _alloca(size_t size) {
+    __asm__ volatile (
+        "push   %ecx                  \n\t"   // save ECX
+
+        // --- Load size (ESP points to saved ECX, then return addr, then size) ---
+        "mov    8(%esp), %eax         \n\t"   // eax = size
+        "test   %eax, %eax            \n\t"
+        "jz     .Lzero_x86            \n\t"
+
+        // --- Align size to 16 ---
+        "add    $15, %eax             \n\t"
+        "and    $-16, %eax            \n\t"   // aligned_size
+
+        // --- Save original ESP and compute target pointer ---
+        "mov    %esp, %edx            \n\t"   // edx = original ESP (with pushed ECX)
+        "mov    %edx, %ecx            \n\t"
+        "sub    %eax, %ecx            \n\t"   // ecx = original ESP - aligned_size
+        "cmp    %edx, %ecx            \n\t"   // overflow check (unsigned)
+        "ja     .Loverflow_x86        \n\t"
+        "and    $-16, %ecx            \n\t"   // ecx = target = 16‑byte aligned start of block
+
+        // --- New ESP (target – 8) holds saved ECX and return address ---
+        "lea    -8(%ecx), %edx        \n\t"   // edx = new_esp
+
+        // --- Stack limit check ---
+        "mov    %fs:0x08, %eax        \n\t"   // eax = TIB->StackLimit
+        "cmp    %edx, %eax            \n\t"
+        "ja     .Loverflow_x86        \n\t"
+
+        // --- Copy saved ECX and return address down to new_esp ---
+        "mov    (%esp), %eax          \n\t"   // original saved ECX
+        "mov    %eax, (%edx)          \n\t"
+        "mov    4(%esp), %eax         \n\t"   // original return address
+        "mov    %eax, 4(%edx)         \n\t"
+
+        // --- Set ESP to point to the copied return address ---
+        "lea    4(%edx), %esp         \n\t"   // ESP ← new_esp+4
+
+        // --- Reload StackLimit and probe pages down to new_esp ---
+        "mov    %fs:0x08, %eax        \n\t"
+        "1:                            \n\t"
+        "sub    $0x1000, %eax         \n\t"
+        "test   %eax, (%eax)          \n\t"
+        "cmp    %edx, %eax            \n\t"
+        "ja     1b                    \n\t"
+
+        // --- Return value = target, restore ECX and return ---
+        "mov    %ecx, %eax            \n\t"   // return target
+        "lea    (%edx), %esp          \n\t"   // point ESP to saved ECX copy
+        "pop    %ecx                  \n\t"   // restore ECX, ESP now points to ret addr
+        "ret                          \n\t"
+
+        // --- Zero size: return current ESP ---
+        ".Lzero_x86:                  \n\t"
+        "mov    %esp, %eax            \n\t"
+        "pop    %ecx                  \n\t"
+        "ret                          \n\t"
+
+        // --- Overflow / error – debugging trap ---
+        ".Loverflow_x86:              \n\t"
+        "int3                         \n\t"
+    );
+}
+
+#endif // ARCH_X86
+
 int __wcsicmp(const wchar_t* a, const wchar_t* b) {
     while (*a && *b) {
         wchar_t ca = (*a >= L'A' && *a <= L'Z') ? (*a + 32) : *a;
@@ -1027,13 +1185,38 @@ int __wcsicmp(const wchar_t* a, const wchar_t* b) {
 
 
 static int _fmt_uint(unsigned long long val, int base, int upper, char* buf) {
-    static const char* lo = lcg_encrypt("0123456789abcdef");
-    static const char* up = lcg_encrypt("0123456789ABCDEF");
-    const char* digs = upper ? up : lo;
+    static const char* digs_lo = lcg_encrypt("0123456789abcdef");
+    static const char* digs_up = lcg_encrypt("0123456789ABCDEF");
+    const char* digs = upper ? digs_up : digs_lo;
     char tmp[22];
     int n = 0;
     if (val == 0) { buf[0] = '0'; return 1; }
+#ifdef __i386__
+    while (val) {
+        if (base == 16) {
+            tmp[n++] = digs[val & 0xF];
+            val >>= 4;
+        } else if (base == 8) {
+            tmp[n++] = digs[val & 7];
+            val >>= 3;
+        } else {
+            // base == 10: use x86 DIVL (EDX:EAX / r/m32) to avoid __udivdi3/__umoddi3
+            uint32_t hi32 = (uint32_t)(val >> 32);
+            uint32_t lo32 = (uint32_t)val;
+            uint32_t q1 = 0, r1 = 0, q2, r2;
+            if (hi32 >= 10) {
+                __asm__("divl %4" : "=a"(q1), "=d"(r1) : "d"(0U), "a"(hi32), "rm"(10U));
+            } else {
+                r1 = hi32;
+            }
+            __asm__("divl %4" : "=a"(q2), "=d"(r2) : "d"(r1), "a"(lo32), "rm"(10U));
+            tmp[n++] = digs[r2];
+            val = ((unsigned long long)q1 << 32) | q2;
+        }
+    }
+#else
     while (val) { tmp[n++] = digs[val % base]; val /= base; }
+#endif
     for (int i = 0; i < n; i++) buf[i] = tmp[n - 1 - i];
     return n;
 }
@@ -1255,14 +1438,15 @@ int __snprintf(char* buf, size_t sz, const char* fmt, ...) {
 
 /* WARNING THIS IS BLOCKING! */
 void enterLock(volatile long* lock) {
-    while (_InterlockedCompareExchange(lock, 1, 0) != 0) {
-        // Busy wait with yield to reduce CPU usage
-        _mm_pause();  // Yield to other threads
+    long expected = 0;
+    while (!__atomic_compare_exchange_n(lock, &expected, 1, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) {
+        expected = 0;
+        _mm_pause();
     }
 }
 
 void leaveLock(volatile long* lock) {
-    _InterlockedExchange(lock, 0);
+    __atomic_store_n(lock, 0, __ATOMIC_SEQ_CST);
 }
 
 #include <atomic>
